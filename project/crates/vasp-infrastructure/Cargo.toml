@@ -1,0 +1,19 @@
+[package]
+name = "vasp-infrastructure"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "实现 domain 的 trait：文件系统、存储、Hermes 子进程、日志。"
+
+[dependencies]
+vasp-domain = { path = "../vasp-domain" }
+vasp-application = { path = "../vasp-application" }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+anyhow = { workspace = true }
+walkdir = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+time = { workspace = true }
+sha2 = { workspace = true }

@@ -1,0 +1,7 @@
+{
+  "name": "vaspflow-reference",
+  "private": true,
+  "version": "0.2.0",
+  "type": "module",
+  "description": "原 VASPFlow host 代码（MIT）。只读参考，不参与构建，仅用于生成对拍基准。"
+}

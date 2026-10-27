@@ -1,0 +1,9 @@
+packages:
+  - "apps/*"
+  - "packages/*"
+
+# pnpm 10+ 默认拦截依赖的 postinstall。这两个必须放行，
+# 否则 electron.exe 与 esbuild 的平台二进制不会下载。
+allowBuilds:
+  electron: true
+  esbuild: true

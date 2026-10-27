@@ -1,0 +1,14 @@
+{
+  "name": "dftwork",
+  "version": "0.1.0",
+  "private": true,
+  "description": "VASP 计算任务工作台：独立桌面软件，AI 可选",
+  "license": "MIT",
+  "packageManager": "pnpm@12.3.4",
+  "scripts": {
+    "dev": "pnpm --filter @dftwork/desktop dev",
+    "build": "pnpm --filter @dftwork/desktop build",
+    "typecheck": "pnpm -r typecheck",
+    "core": "cargo build -p vasp-cli --release"
+  }
+}

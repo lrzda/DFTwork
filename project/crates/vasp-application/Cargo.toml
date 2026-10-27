@@ -1,0 +1,13 @@
+[package]
+name = "vasp-application"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "14 个用例：编排领域能力、读文件、组装 DTO。"
+
+[dependencies]
+vasp-domain = { path = "../vasp-domain" }
+serde = { workspace = true }
+thiserror = { workspace = true }
+time = { workspace = true }
+tracing = { workspace = true }

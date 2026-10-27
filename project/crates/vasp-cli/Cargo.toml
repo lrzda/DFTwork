@@ -1,0 +1,22 @@
+[package]
+name = "vasp-cli"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "vaspcore.exe：唯一组合根 + 子命令 → JSON。"
+
+[[bin]]
+name = "vaspcore"
+path = "src/main.rs"
+
+[dependencies]
+vasp-domain = { path = "../vasp-domain" }
+vasp-application = { path = "../vasp-application" }
+vasp-infrastructure = { path = "../vasp-infrastructure" }
+serde = { workspace = true }
+serde_json = { workspace = true }
+anyhow = { workspace = true }
+clap = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+time = { workspace = true }

@@ -1,0 +1,15 @@
+[package]
+name = "vasp-domain"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "VASP 领域逻辑：解析、判定、规则、计划生成。零文件 IO。"
+
+# 关键约束：这里不写任何内部依赖（vasp-application / vasp-infrastructure）。
+# Cargo 因此在物理上禁止 domain 引用上层，分层不靠自觉。
+[dependencies]
+serde = { workspace = true }
+thiserror = { workspace = true }
+time = { workspace = true }
+sha2 = { workspace = true }
+regex = { workspace = true }

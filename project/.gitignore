@@ -1,0 +1,27 @@
+# Rust
+/target/
+**/*.rs.bk
+
+# Node
+node_modules/
+dist/
+out/
+*.log
+
+# 构建产物
+release/
+*.exe
+!scripts/*.exe
+
+# 本地状态与备份
+.dftwork/
+store.json
+
+# 编辑器
+.vscode/
+.idea/
+.DS_Store
+
+# 对拍产物（由 scripts/gen-golden.mjs 生成，体积大）
+/tests/golden/*.json
+!/tests/golden/.gitkeep

@@ -1,0 +1,5 @@
+[toolchain]
+channel = "stable-x86_64-pc-windows-gnu"
+# 不写 components：minimal profile 里没有 rustfmt/clippy，
+# 一旦声明，rustup 每次调用都会联网同步通道并卡住。
+profile = "minimal"

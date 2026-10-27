@@ -1,0 +1,7 @@
+[target.x86_64-pc-windows-gnu]
+# 静态链接 CRT：产物不依赖 libgcc_s_seh-1.dll / libwinpthread-1.dll，
+# 单个 exe 可以直接丢到别的机器（包括集群登录节点）运行。
+rustflags = ["-C", "target-feature=+crt-static"]
+
+[target.x86_64-unknown-linux-gnu]
+rustflags = ["-C", "target-feature=+crt-static"]

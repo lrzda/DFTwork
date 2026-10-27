@@ -1,0 +1,19 @@
+# 行尾统一：仓库里一律存 LF，检出时也保持 LF。
+# 不设的话 Git for Windows 的 core.autocrlf=true 会把所有文件转成 CRLF，
+# 将来在 macOS/Linux 上 clone 会看到「整个文件都改了」的假 diff。
+* text=auto eol=lf
+
+# 二进制：不参与行尾转换与文本 diff
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.exe binary
+*.dll binary
+*.zip binary
+*.pdf binary
+
+# Windows 批处理必须 CRLF，否则 cmd 解析出错
+*.bat text eol=crlf
+*.cmd text eol=crlf
