@@ -52,6 +52,11 @@ export function mulMatVec(m: Mat3, v: Vec3): Vec3 {
   ];
 }
 
+/** 笛卡尔 → 分数坐标。 */
+export function toFractional(inv: Mat3, position: Vec3): Vec3 {
+  return mulMatVec(inv, position);
+}
+
 /**
  * 把笛卡尔坐标折回原胞（**wrap**）。
  *
@@ -83,12 +88,52 @@ export function wrapToCell(position: Vec3, cell: [Vec3, Vec3, Vec3]): Vec3 {
   return mulMatVec(M, wrapped);
 }
 
+/** 最小镜像搜索的结果。 */
+export interface MinImageResult {
+  /**
+   * 最优整数平移 `n`，使得 `(fb + n)` 离 `fa` 最近（分数坐标下的整数个晶格矢量）。
+   * 全为 0 表示两个原子本来就在同一个像里。
+   */
+  offset: Vec3;
+  /** 平移后的真实距离（Å）。 */
+  distance: number;
+}
+
 /**
- * 原子是否已经落在原胞内。
+ * 求两原子之间的最小镜像偏移与距离。
  *
- * 判据用 `[-tol, 1+tol]` 而不是 `[0, 1)`：分数坐标 `1.0` 与 `0.0` 是同一个位置，
- * 浮点运算（`0.9999999`）也会在边界上抖，把这类原子算成「盒外」纯属误报。
+ * `offset = n` 的含义：**B 的镜像原子在 `fb + n` 处，离 A 最近**；
+ * 对称地，A 靠近 B 的镜像在 `fa - n` 处。
+ *
+ * 成键判定与渲染都要用它：
+ * - 判定用 `distance`（跨界相邻的原子确实是键）；
+ * - 渲染用 `offset`（在盒子外补一个镜像球，键就不会横穿整个盒子）。
  */
+export function minImageOffset(
+  fa: Vec3,
+  fb: Vec3,
+  cell: [Vec3, Vec3, Vec3],
+): MinImageResult {
+  const m = latticeMatrix(cell);
+  let bestSq = Infinity;
+  let best: Vec3 = [0, 0, 0];
+
+  for (let i = -1; i <= 1; i += 1) {
+    for (let j = -1; j <= 1; j += 1) {
+      for (let k = -1; k <= 1; k += 1) {
+        const d: Vec3 = [fb[0] + i - fa[0], fb[1] + j - fa[1], fb[2] + k - fa[2]];
+        const cart = mulMatVec(m, d);
+        const r2 = cart[0] * cart[0] + cart[1] * cart[1] + cart[2] * cart[2];
+        if (r2 < bestSq) {
+          bestSq = r2;
+          best = [i, j, k];
+        }
+      }
+    }
+  }
+  return { offset: best, distance: Math.sqrt(bestSq) };
+}
+
 export function isInsideCell(position: Vec3, cell: [Vec3, Vec3, Vec3], tol = 1e-4): boolean {
   const Minv = invert3x3(latticeMatrix(cell));
   if (!Minv) return true;

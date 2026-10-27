@@ -2,11 +2,15 @@
 mod classify;
 mod convergence;
 mod detect;
+mod elements;
+mod geometry;
 mod structure;
 mod stubs;
 
 pub use classify::*;
 pub use convergence::*;
 pub use detect::*;
+pub use elements::*;
+pub use geometry::*;
 pub use structure::*;
 pub use stubs::*;

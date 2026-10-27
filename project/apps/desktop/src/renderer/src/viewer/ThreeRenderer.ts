@@ -2,7 +2,14 @@ import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import type { StructureScene, Vec3 } from "@dftwork/shared";
 import { elementStyle } from "./elements";
-import { wrapToCell } from "./geometry";
+import {
+  invert3x3,
+  latticeMatrix,
+  minImageOffset,
+  mulMatVec,
+  toFractional,
+  wrapToCell,
+} from "./geometry";
 import {
   DEFAULT_OPTIONS,
   type EffectContext,
@@ -116,6 +123,12 @@ export class ThreeRenderer implements SceneRenderer {
       this.options.wrapPbc ? wrapToCell(a.position, data.cell) : a.position,
     );
 
+    // 分数坐标：成键判定的镜像搜索、以及跨界镜像球定位都要用
+    const invLattice = invert3x3(latticeMatrix(data.cell));
+    const frac: Vec3[] = invLattice
+      ? effective.map((p) => toFractional(invLattice, p))
+      : effective.map(() => [0, 0, 0] as Vec3);
+
     // 几何中心：原子 + 晶胞顶点一起算，保证盒子四个角都在视野里
     const corners = cellCorners(data.cell);
     const points = [...corners, ...effective.map((p) => new THREE.Vector3(p[0], p[1], p[2]))];
@@ -155,9 +168,21 @@ export class ThreeRenderer implements SceneRenderer {
       root.add(buildCellLines(corners, center, this.options.cellColor));
     }
 
-    // ── 4. 化学键（首版 bonds 为空，等成键算法上线后自动生效）
+    // ── 4. 化学键：跨界的键补镜像原子，否则键会横穿整个盒子
+    //      （实测某 MD 快照 一批键里 107 根是跨界的，最长一根画出来 24 Å，
+    //       而真实键长只有 3 Å。不补镜像的话画面几乎全是乱线。）
     if (this.options.showBonds && data.bonds.length > 0) {
-      root.add(buildBonds(data.bonds, atomPositions));
+      root.add(
+        buildBonds({
+          data,
+          frac,
+          atomPositions,
+          center,
+          sphere,
+          matFor: (el) => matByElement.get(el)!,
+          atomScale: this.options.atomScale,
+        }),
+      );
     }
 
     // ── 5. 相机自适应：按包围盒外接球算距离，45° 视场下留 1.55 倍余量
@@ -316,29 +341,93 @@ function popcount3(n: number): number {
   return c;
 }
 
-/** 化学键：每根键是一个细圆柱，从 a 指向 b。 */
-function buildBonds(
-  bonds: Array<{ a: number; b: number }>,
-  positions: THREE.Vector3[],
-): THREE.Group {
+interface BondBuildInput {
+  data: StructureScene;
+  /** 每个原子的分数坐标（已考虑 wrap 开关）。 */
+  frac: Vec3[];
+  /** 每个原子的显示位置（已减去几何中心）。 */
+  atomPositions: THREE.Vector3[];
+  center: THREE.Vector3;
+  /** 复用的单位球几何体，用来画镜像原子。 */
+  sphere: THREE.SphereGeometry;
+  matFor: (element: string) => THREE.MeshStandardMaterial;
+  atomScale: number;
+}
+
+/**
+ * 化学键渲染。
+ *
+ * 同一像内的键直接连两根原子；**跨界的键改为各连一个镜像球**——
+ * 这是 VESTA 的做法：与其把键拉成横穿盒子的一条长线（视觉上完全误导），
+ * 不如在盒子外补一个对称位置的球，让两边的成键环境都完整。
+ *
+ * 镜像球的位置由 `minImageOffset` 给出：
+ * - B 靠近 A 的镜像在 `fb + offset`
+ * - A 靠近 B 的镜像在 `fa - offset`
+ */
+function buildBonds(input: BondBuildInput): THREE.Group {
+  const { data, frac, atomPositions, center, sphere, matFor, atomScale } = input;
+
   const group = new THREE.Group();
   const cyl = new THREE.CylinderGeometry(1, 1, 1, 10, 1, true);
-  const mat = new THREE.MeshStandardMaterial({ color: 0xb8c2cf, roughness: 0.55, metalness: 0.1 });
+  const bondMat = new THREE.MeshStandardMaterial({
+    color: 0xb8c2cf,
+    roughness: 0.55,
+    metalness: 0.1,
+  });
   const up = new THREE.Vector3(0, 1, 0);
+  const lattice = latticeMatrix(data.cell);
 
-  for (const bond of bonds) {
-    const pa = positions[bond.a];
-    const pb = positions[bond.b];
-    if (!pa || !pb) continue;
-    const dir = new THREE.Vector3().subVectors(pb, pa);
+  const toCart = (f: Vec3): THREE.Vector3 => {
+    const c = mulMatVec(lattice, f);
+    return new THREE.Vector3(c[0], c[1], c[2]).sub(center);
+  };
+
+  const addStick = (p0: THREE.Vector3, p1: THREE.Vector3): void => {
+    const dir = new THREE.Vector3().subVectors(p1, p0);
     const len = dir.length();
-    if (len < 1e-6) continue;
-
-    const mesh = new THREE.Mesh(cyl, mat);
-    mesh.position.copy(pa).addScaledVector(dir, 0.5);
-    mesh.scale.set(0.11, len, 0.11);
-    mesh.quaternion.setFromUnitVectors(up, dir.normalize());
+    if (len < 1e-6 || !Number.isFinite(len)) return;
+    const mesh = new THREE.Mesh(cyl, bondMat);
+    mesh.position.copy(p0).addScaledVector(dir, 0.5);
+    mesh.scale.set(0.085, len, 0.085);
+    mesh.quaternion.setFromUnitVectors(up, dir.clone().normalize());
     group.add(mesh);
+  };
+
+  // 同一个镜像位置可能被多根键共用，去重后能少画不少球
+  const ghostSeen = new Set<string>();
+  const addGhost = (atomIndex: number, fracPos: Vec3): void => {
+    const key = `${atomIndex}:${fracPos[0].toFixed(4)}:${fracPos[1].toFixed(4)}:${fracPos[2].toFixed(4)}`;
+    if (ghostSeen.has(key)) return;
+    ghostSeen.add(key);
+
+    const atom = data.atoms[atomIndex];
+    const style = elementStyle(atom.element);
+    const mesh = new THREE.Mesh(sphere, matFor(atom.element));
+    mesh.scale.setScalar(Math.max(style.radius * atomScale, 0.06));
+    mesh.position.copy(toCart(fracPos));
+    group.add(mesh);
+  };
+
+  for (const bond of data.bonds) {
+    const fa = frac[bond.a];
+    const fb = frac[bond.b];
+    const { offset } = minImageOffset(fa, fb, data.cell);
+    const crossing = offset[0] !== 0 || offset[1] !== 0 || offset[2] !== 0;
+
+    if (!crossing) {
+      addStick(atomPositions[bond.a], atomPositions[bond.b]);
+      continue;
+    }
+
+    const bGhost: Vec3 = [fb[0] + offset[0], fb[1] + offset[1], fb[2] + offset[2]];
+    addStick(atomPositions[bond.a], toCart(bGhost));
+    addGhost(bond.b, bGhost);
+
+    const aGhost: Vec3 = [fa[0] - offset[0], fa[1] - offset[1], fa[2] - offset[2]];
+    addStick(atomPositions[bond.b], toCart(aGhost));
+    addGhost(bond.a, aGhost);
   }
+
   return group;
 }
