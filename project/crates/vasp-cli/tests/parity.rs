@@ -35,7 +35,17 @@ fn convergence_matches_reference_golden() {
         let json: serde_json::Value = serde_json::from_str(&text).expect("golden 是 JSON");
 
         let fixture = json["fixture"].as_str().expect("fixture 字段").to_string();
-        let fixture_dir = repo_root().join("tests").join("fixtures").join(&fixture);
+
+        // golden 里记了任务目录的绝对路径。样例数据不进仓库，
+        // 所以不能再假设它躺在 tests/fixtures 下。
+        let fixture_dir = match json["fixture_dir"].as_str() {
+            Some(d) => PathBuf::from(d),
+            None => repo_root().join("tests").join("fixtures").join(&fixture),
+        };
+        if !fixture_dir.exists() {
+            eprintln!("跳过 {fixture}：目录不存在 {}", fixture_dir.display());
+            continue;
+        }
 
         // 能量：比步数与数值
         let oszicar = std::fs::read_to_string(fixture_dir.join("OSZICAR"))
