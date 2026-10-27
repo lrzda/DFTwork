@@ -50,10 +50,14 @@ function createWindow(): void {
   if (devUrl) {
     void win.loadURL(devUrl);
   } else {
-    const query = process.env.DFTWORK_SMOKE_ROOT
-      ? { project: process.env.DFTWORK_SMOKE_ROOT }
-      : undefined;
-    void win.loadFile(path.join(__dirname, "../renderer/index.html"), query ? { query } : undefined);
+    const query: Record<string, string> = {};
+    if (process.env.DFTWORK_SMOKE_ROOT) query.project = process.env.DFTWORK_SMOKE_ROOT;
+    // 冒烟时可指定初始渲染状态，用于截「PBC 关 / 开」这类对比图
+    if (process.env.DFTWORK_SMOKE_WRAP) query.wrap = process.env.DFTWORK_SMOKE_WRAP;
+    void win.loadFile(
+      path.join(__dirname, "../renderer/index.html"),
+      Object.keys(query).length > 0 ? { query } : undefined,
+    );
   }
 
   // 冒烟模式：加载完成后截图并退出，用来在无人值守时证明「界面真的渲染出来了」。

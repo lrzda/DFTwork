@@ -15,6 +15,16 @@ export interface RenderOptions {
   showCell: boolean;
   /** 是否画化学键（`scene.bonds` 为空时无效）。 */
   showBonds: boolean;
+  /**
+   * 是否把原子折回原胞（PBC wrap）。
+   *
+   * POSCAR / CONTCAR / MD 轨迹里的坐标可以落在盒子外（分数坐标 <0 或 >1），
+   * 打开后所有原子被平移回 `[0,1)` 的分数区间。
+   *
+   * ⚠️ 代价：跨越边界的分子会被劈成两半，成键线要横穿整个盒子。
+   * 所以它默认**关闭**——保持数据原样最不容易误导。
+   */
+  wrapPbc: boolean;
   /** 背景色，`transparent` 表示透明。 */
   background: string;
   /** 晶胞棱颜色。 */
@@ -25,6 +35,7 @@ export const DEFAULT_OPTIONS: RenderOptions = {
   atomScale: 0.32,
   showCell: true,
   showBonds: true,
+  wrapPbc: false,
   background: "transparent",
   cellColor: "#5b7089",
 };

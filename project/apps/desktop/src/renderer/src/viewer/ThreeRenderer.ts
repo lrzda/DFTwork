@@ -2,6 +2,7 @@ import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import type { StructureScene, Vec3 } from "@dftwork/shared";
 import { elementStyle } from "./elements";
+import { wrapToCell } from "./geometry";
 import {
   DEFAULT_OPTIONS,
   type EffectContext,
@@ -108,9 +109,16 @@ export class ThreeRenderer implements SceneRenderer {
       return;
     }
 
-    // ── 1. 几何中心：原子 + 晶胞顶点一起算，保证盒子四个角都在视野里
+    // ── 1. 有效坐标：可能落在盒子外（MD 轨迹、优化后的 CONTCAR 都常见）。
+    //      wrap 开关打开时先折回原胞——必须在算包围盒之前做，
+    //      否则盒外的原子会把包围盒撑大，相机拉远后盒子缩成一小块。
+    const effective: Vec3[] = data.atoms.map((a) =>
+      this.options.wrapPbc ? wrapToCell(a.position, data.cell) : a.position,
+    );
+
+    // 几何中心：原子 + 晶胞顶点一起算，保证盒子四个角都在视野里
     const corners = cellCorners(data.cell);
-    const points = [...corners, ...data.atoms.map((a) => new THREE.Vector3(a.position[0], a.position[1], a.position[2]))];
+    const points = [...corners, ...effective.map((p) => new THREE.Vector3(p[0], p[1], p[2]))];
     const box = new THREE.Box3();
     for (const p of points) box.expandByPoint(p);
     const center = box.getCenter(new THREE.Vector3());
@@ -122,7 +130,7 @@ export class ThreeRenderer implements SceneRenderer {
     const matByElement = new Map<string, THREE.MeshStandardMaterial>();
     const atomPositions: THREE.Vector3[] = [];
 
-    for (const atom of data.atoms) {
+    for (const [i, atom] of data.atoms.entries()) {
       const style = elementStyle(atom.element);
       let mat = matByElement.get(atom.element);
       if (!mat) {
@@ -136,7 +144,7 @@ export class ThreeRenderer implements SceneRenderer {
       const mesh = new THREE.Mesh(sphere, mat);
       const r = Math.max(style.radius * this.options.atomScale, 0.06);
       mesh.scale.setScalar(r);
-      const p = new THREE.Vector3(atom.position[0], atom.position[1], atom.position[2]).sub(center);
+      const p = new THREE.Vector3(effective[i][0], effective[i][1], effective[i][2]).sub(center);
       mesh.position.copy(p);
       atomPositions.push(p);
       root.add(mesh);
@@ -175,7 +183,7 @@ export class ThreeRenderer implements SceneRenderer {
   }
 
   setOptions(partial: Partial<RenderOptions>): void {
-    const geomAffecting: Array<keyof RenderOptions> = ["atomScale", "showCell", "showBonds", "cellColor"];
+    const geomAffecting: Array<keyof RenderOptions> = ["atomScale", "showCell", "showBonds", "cellColor", "wrapPbc"];
     const needsRebuild = geomAffecting.some((k) => partial[k] !== undefined);
     this.options = { ...this.options, ...partial };
     this.applyBackground();

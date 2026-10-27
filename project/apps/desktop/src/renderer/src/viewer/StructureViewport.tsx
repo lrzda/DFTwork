@@ -4,6 +4,7 @@ import type { StructureScene } from "@dftwork/shared";
 import { DEFAULT_OPTIONS, type RenderOptions } from "./SceneRenderer";
 import { ThreeRenderer } from "./ThreeRenderer";
 import { legendOf } from "./elements";
+import { isInsideCell } from "./geometry";
 
 const { Text } = Typography;
 
@@ -27,7 +28,11 @@ export function StructureViewport({ scene, loading, sourceName, error }: Props):
   const hostRef = useRef<HTMLDivElement | null>(null);
   const rendererRef = useRef<ThreeRenderer | null>(null);
   const [ready, setReady] = useState(false);
-  const [options, setOptions] = useState<RenderOptions>({ ...DEFAULT_OPTIONS });
+  // 初始状态可由 `?wrap=1` 指定（冒烟截图 / 分享链接用），默认关闭
+  const [options, setOptions] = useState<RenderOptions>(() => ({
+    ...DEFAULT_OPTIONS,
+    wrapPbc: new URLSearchParams(window.location.search).get("wrap") === "1",
+  }));
 
   // 挂载一次：建渲染器，卸载时销毁（不销毁会泄漏 WebGL 上下文，切几次任务就白屏）
   useEffect(() => {
@@ -60,6 +65,15 @@ export function StructureViewport({ scene, loading, sourceName, error }: Props):
 
   const symbols = useMemo(() => (scene ? scene.atoms.map((a) => a.element) : []), [scene]);
   const legend = useMemo(() => legendOf(symbols), [symbols]);
+
+  /** 有多少原子落在原胞外——用户需要知道「图为什么看起来是散的」。 */
+  const outsideCount = useMemo(() => {
+    if (!scene) return 0;
+    return scene.atoms.reduce(
+      (n, a) => (isInsideCell(a.position, scene.cell) ? n : n + 1),
+      0,
+    );
+  }, [scene]);
   const counts = useMemo(() => {
     const m = new Map<string, number>();
     for (const s of symbols) m.set(s, (m.get(s) ?? 0) + 1);
@@ -90,6 +104,13 @@ export function StructureViewport({ scene, loading, sourceName, error }: Props):
             {scene.bonds.length > 0 ? ` · ${scene.bonds.length} 根键` : " · 暂无成键信息"}
           </Text>
         )}
+        {outsideCount > 0 && !options.wrapPbc && (
+          <Tooltip title="这些原子的分数坐标落在 [0,1) 之外（MD 快照与优化后的结构很常见）。打开 PBC 开关可把它们折回原胞——代价是跨越边界的分子会被劈开">
+            <Tag color="orange" style={{ cursor: "help", margin: 0 }}>
+              {outsideCount} 个在盒外
+            </Tag>
+          </Tooltip>
+        )}
         {loading && (
           <Text type="secondary" style={{ fontSize: 12 }}>
             读取中…
@@ -97,7 +118,31 @@ export function StructureViewport({ scene, loading, sourceName, error }: Props):
         )}
         <div style={{ flex: 1 }} />
         {hasScene && (
-          <Space size={8}>
+          <Space size={10}>
+            <Tooltip
+              title={
+                options.wrapPbc
+                  ? "已把所有原子折回 [0,1) 分数区间。跨界分子会被劈成两半"
+                  : "把落在盒外的原子折回原胞（按 PBC 平移整数个晶格矢量）"
+              }
+            >
+              <Space size={4} style={{ cursor: "help" }}>
+                <Text
+                  style={{
+                    fontSize: 12,
+                    color: options.wrapPbc ? "#69b1ff" : "#8b9bb4",
+                    userSelect: "none",
+                  }}
+                >
+                  PBC 折回
+                </Text>
+                <Switch
+                  size="small"
+                  checked={options.wrapPbc}
+                  onChange={(v) => setOptions((o) => ({ ...o, wrapPbc: v }))}
+                />
+              </Space>
+            </Tooltip>
             <Tooltip title="原子球大小">
               <Slider
                 style={{ width: 96, margin: 0 }}
