@@ -25,11 +25,13 @@ import type {
   ConvergenceSeries,
   HermesCapability,
   ScanReport,
+  StructureScene,
   TaskStatusCode,
   TaskSummary,
   VersionInfo,
 } from "@dftwork/shared";
 import { api, describeError } from "./api";
+import { StructureViewport } from "./viewer/StructureViewport";
 
 const { Title, Text, Paragraph } = Typography;
 
@@ -50,6 +52,9 @@ export default function App(): JSX.Element {
   const [report, setReport] = useState<ScanReport | null>(null);
   const [selected, setSelected] = useState<TaskSummary | null>(null);
   const [series, setSeries] = useState<ConvergenceSeries | null>(null);
+  const [scene, setScene] = useState<StructureScene | null>(null);
+  const [sceneLoading, setSceneLoading] = useState(false);
+  const [sceneError, setSceneError] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [ver, setVer] = useState<VersionInfo | null>(null);
   const [hermes, setHermes] = useState<HermesCapability | null>(null);
@@ -96,14 +101,23 @@ export default function App(): JSX.Element {
     async (task: TaskSummary) => {
       setSelected(task);
       setSeries(null);
+      setScene(null);
+      setSceneError(null);
       if (!report) return;
       const sep = report.root.includes("\\") ? "\\" : "/";
       const abs = `${report.root.replace(/[\\/]+$/, "")}${sep}${task.rel_path.replace(/\//g, sep)}`;
-      try {
-        setSeries(await api.convergence(abs));
-      } catch (e) {
-        setError(describeError(e));
-      }
+
+      // 收敛与结构并行取：一边失败不该让另一边也空着
+      setSceneLoading(true);
+      const [conv, sc] = await Promise.allSettled([api.convergence(abs), api.scene(abs)]);
+
+      if (conv.status === "fulfilled") setSeries(conv.value);
+      else setError(describeError(conv.reason));
+
+      if (sc.status === "fulfilled") setScene(sc.value);
+      else setSceneError(describeError(sc.reason));
+
+      setSceneLoading(false);
     },
     [report],
   );
@@ -225,29 +239,52 @@ export default function App(): JSX.Element {
           </Spin>
         </Card>
 
-        <Card size="small" title={selected ? `收敛 · ${selected.rel_path}` : "收敛曲线"} className="right">
-          {series && series.steps.length > 0 ? (
-            <ResponsiveContainer width="100%" height={320}>
-              <LineChart data={chartData} margin={{ top: 8, right: 16, bottom: 8, left: 8 }}>
-                <CartesianGrid strokeDasharray="3 3" opacity={0.3} />
-                <XAxis dataKey="step" tick={{ fontSize: 12 }} label={{ value: "离子步", position: "insideBottom", offset: -4 }} />
-                <YAxis yAxisId="e" tick={{ fontSize: 12 }} width={80} />
-                <YAxis yAxisId="f" orientation="right" tick={{ fontSize: 12 }} width={60} />
-                <Tooltip />
-                <Line yAxisId="e" type="monotone" dataKey="energy" name="F (eV)" dot={false} strokeWidth={2} />
-                <Line yAxisId="f" type="monotone" dataKey="force" name="最大力 (eV/Å)" dot={false} strokeWidth={2} />
-              </LineChart>
-            </ResponsiveContainer>
-          ) : (
-            <Empty description={selected ? "没有读到离子步（OSZICAR 缺失或格式待支持）" : "选一个任务"} />
-          )}
-          {series && (
-            <Paragraph type="secondary" style={{ marginTop: 8, marginBottom: 0, fontSize: 12 }}>
-              来源 {series.source} · {series.steps.length} 步
-              {series.truncated ? " · 已截断" : ""}
-            </Paragraph>
-          )}
-        </Card>
+        <div className="right-col">
+          <Card
+            size="small"
+            className="pane pane-structure"
+            title={selected ? `3D 结构 · ${selected.rel_path}` : "3D 结构"}
+          >
+            <StructureViewport
+              scene={scene}
+              loading={sceneLoading}
+              sourceName={scene?.source_file ?? null}
+              error={sceneError}
+            />
+          </Card>
+
+          <Card
+            size="small"
+            className="pane pane-convergence"
+            title={selected ? `收敛 · ${selected.rel_path}` : "收敛曲线"}
+          >
+            {series && series.steps.length > 0 ? (
+              <div style={{ flex: 1, minHeight: 0 }}>
+                <ResponsiveContainer width="100%" height="100%">
+                  <LineChart data={chartData} margin={{ top: 8, right: 16, bottom: 8, left: 8 }}>
+                    <CartesianGrid strokeDasharray="3 3" opacity={0.3} />
+                    <XAxis dataKey="step" tick={{ fontSize: 12 }} label={{ value: "离子步", position: "insideBottom", offset: -4 }} />
+                    <YAxis yAxisId="e" tick={{ fontSize: 12 }} width={80} />
+                    <YAxis yAxisId="f" orientation="right" tick={{ fontSize: 12 }} width={60} />
+                    <Tooltip />
+                    <Line yAxisId="e" type="monotone" dataKey="energy" name="F (eV)" dot={false} strokeWidth={2} />
+                    <Line yAxisId="f" type="monotone" dataKey="force" name="最大力 (eV/Å)" dot={false} strokeWidth={2} />
+                  </LineChart>
+                </ResponsiveContainer>
+              </div>
+            ) : (
+              <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", minHeight: 0 }}>
+                <Empty description={selected ? "没有读到离子步（OSZICAR 缺失或格式待支持）" : "选一个任务"} />
+              </div>
+            )}
+            {series && (
+              <Paragraph type="secondary" style={{ marginTop: 8, marginBottom: 0, fontSize: 12 }}>
+                来源 {series.source} · {series.steps.length} 步
+                {series.truncated ? " · 已截断" : ""}
+              </Paragraph>
+            )}
+          </Card>
+        </div>
       </div>
     </div>
   );

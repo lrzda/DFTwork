@@ -31,6 +31,13 @@ pub struct StructureScene {
     pub selective_dynamics: bool,
     /// 缩放因子（POSCAR 第二行）。
     pub scale: f64,
+    /// 这份数据来自哪个文件（`POSCAR` / `CONTCAR` / 其它）。
+    ///
+    /// 解析函数只认内容、不知道文件名，所以这里恒为 `None`；
+    /// 由用例层（`GetStructureScene`）在读完文件后填上。
+    /// 界面要靠它告诉用户「你现在看的是原始输入还是优化后的结构」。
+    #[serde(default)]
+    pub source_file: Option<String>,
 }
 
 impl StructureScene {

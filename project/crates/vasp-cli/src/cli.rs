@@ -31,7 +31,7 @@ pub enum Commands {
 
     /// 把 POSCAR / CONTCAR 读成 3D 场景。
     Scene {
-        /// 结构文件路径。
+        /// 结构文件路径，或任务目录（自动挑 POSCAR / CONTCAR）。
         file: String,
     },
 

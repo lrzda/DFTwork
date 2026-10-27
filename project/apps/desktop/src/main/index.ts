@@ -70,7 +70,7 @@ function createWindow(): void {
           console.info(`[dftwork] smoke screenshot = ${out}`);
           app.quit();
         });
-      }, 2500); // 留时间给首屏数据（scan 调用 + 图表）
+      }, 4000); // 留时间给首屏数据（scan + scene 两次 IPC）与 three.js 初始化
     });
   }
 }

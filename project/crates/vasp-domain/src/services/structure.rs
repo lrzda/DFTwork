@@ -152,6 +152,8 @@ pub fn parse_poscar(text: &str) -> DomainResult<StructureScene> {
         comment,
         selective_dynamics,
         scale,
+        // 文件名由用例层填（解析不认识文件名）
+        source_file: None,
     })
 }
 

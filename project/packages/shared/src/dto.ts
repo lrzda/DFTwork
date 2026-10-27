@@ -90,11 +90,16 @@ export interface Bond {
 export interface StructureScene {
   cell: [Vec3, Vec3, Vec3];
   atoms: Atom[];
-  /** 可能为空：成键算法待与 reference 对拍，前端需降级为只画原子。 */
+  /**
+   * 化学键。首版恒为空数组——成键算法待与 reference 对拍，
+   * 渲染器必须能降级为「只画原子」。
+   */
   bonds: Bond[];
   comment: string;
   selective_dynamics: boolean;
   scale: number;
+  /** 数据来自哪个文件（POSCAR / CONTCAR），由内核填入。 */
+  source_file: string | null;
 }
 
 export interface HermesCapability {

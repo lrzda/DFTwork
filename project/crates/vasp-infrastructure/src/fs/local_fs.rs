@@ -79,6 +79,10 @@ impl Fs for LocalFs {
     fn exists(&self, path: &Path) -> bool {
         path.exists()
     }
+
+    fn is_dir(&self, path: &Path) -> bool {
+        path.is_dir()
+    }
 }
 
 /// 解码文本：UTF-8 优先；失败时按 GBK 尝试——Windows 上从中文环境导出的

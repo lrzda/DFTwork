@@ -25,6 +25,12 @@ pub trait Fs: Send + Sync {
     fn read_tail(&self, path: &Path, max_bytes: u64) -> Result<String, AppError>;
 
     fn exists(&self, path: &Path) -> bool;
+
+    /// 是否是目录。
+    ///
+    /// 调用方经常要处理「给文件也行、给目录也行」的入参（例如 `scene` 命令），
+    /// 缺了它就只能靠 `list_dir` 是否报错来猜，那是拿异常当控制流。
+    fn is_dir(&self, path: &Path) -> bool;
 }
 
 /// 单个文件读取上限：64 MB。超过时调用方应改用 [`Fs::read_tail`]。
