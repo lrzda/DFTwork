@@ -8,6 +8,7 @@ import {
   Space,
   Spin,
   Table,
+  Tabs,
   Tag,
   Typography,
 } from "antd";
@@ -31,6 +32,7 @@ import type {
   VersionInfo,
 } from "@dftwork/shared";
 import { api, describeError } from "./api";
+import { StatsPanel } from "./StatsPanel";
 import { StructureViewport } from "./viewer/StructureViewport";
 
 const { Title, Text, Paragraph } = Typography;
@@ -55,6 +57,18 @@ export default function App(): JSX.Element {
   const [scene, setScene] = useState<StructureScene | null>(null);
   const [sceneLoading, setSceneLoading] = useState(false);
   const [sceneError, setSceneError] = useState<string | null>(null);
+  /**
+   * PBC 模式。同时决定两件事：原子是否折回原胞、成键是否按最小镜像算。
+   * 切换它必须重新向内核要一次场景——成键是内核算的，前端不重复实现判据。
+   */
+  const [pbc, setPbc] = useState(
+    // 默认开启；`?wrap=0` 可指定关闭（截图对比与分享链接用）
+    () => new URLSearchParams(window.location.search).get("wrap") !== "0",
+  );
+  /** 左侧标签页：任务表 / 统计。可由 `?tab=stats` 指定初始值（截图与分享用）。 */
+  const [tab, setTab] = useState(
+    () => new URLSearchParams(window.location.search).get("tab") ?? "tasks",
+  );
   const [error, setError] = useState<string | null>(null);
   const [ver, setVer] = useState<VersionInfo | null>(null);
   const [hermes, setHermes] = useState<HermesCapability | null>(null);
@@ -97,29 +111,56 @@ export default function App(): JSX.Element {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  const absPathOf = useCallback(
+    (task: TaskSummary): string => {
+      if (!report) return "";
+      const sep = report.root.includes("\\") ? "\\" : "/";
+      return `${report.root.replace(/[\\/]+$/, "")}${sep}${task.rel_path.replace(/\//g, sep)}`;
+    },
+    [report],
+  );
+
+  /** 只取结构。PBC 切换时会单独再调一次，不会连带重取收敛曲线。 */
+  const fetchScene = useCallback(
+    async (task: TaskSummary, mode: boolean) => {
+      setSceneLoading(true);
+      setSceneError(null);
+      try {
+        setScene(await api.scene(absPathOf(task), mode));
+      } catch (e) {
+        setSceneError(describeError(e));
+      } finally {
+        setSceneLoading(false);
+      }
+    },
+    [absPathOf],
+  );
+
   const pick = useCallback(
     async (task: TaskSummary) => {
       setSelected(task);
       setSeries(null);
       setScene(null);
-      setSceneError(null);
-      if (!report) return;
-      const sep = report.root.includes("\\") ? "\\" : "/";
-      const abs = `${report.root.replace(/[\\/]+$/, "")}${sep}${task.rel_path.replace(/\//g, sep)}`;
-
-      // 收敛与结构并行取：一边失败不该让另一边也空着
-      setSceneLoading(true);
-      const [conv, sc] = await Promise.allSettled([api.convergence(abs), api.scene(abs)]);
-
-      if (conv.status === "fulfilled") setSeries(conv.value);
-      else setError(describeError(conv.reason));
-
-      if (sc.status === "fulfilled") setScene(sc.value);
-      else setSceneError(describeError(sc.reason));
-
-      setSceneLoading(false);
+      // 结构与收敛互不阻塞：一边失败不该让另一边也空着
+      void fetchScene(task, pbc);
+      try {
+        setSeries(await api.convergence(absPathOf(task)));
+      } catch (e) {
+        setError(describeError(e));
+      }
     },
-    [report],
+    [absPathOf, fetchScene, pbc],
+  );
+
+  /** 切换 PBC：成键判据在核心里，所以必须重新要一次场景。 */
+  const handlePbcChange = useCallback(
+    (v: boolean) => {
+      setPbc(v);
+      if (!selected) return;
+      setScene(null);
+      void fetchScene(selected, v);
+    },
+    [selected, fetchScene],
   );
 
   // 冒烟模式：扫完自动选中第一个已完成的任务，让曲线图有内容可截
@@ -138,9 +179,15 @@ export default function App(): JSX.Element {
       render: (v: string) => <Text code>{v}</Text>,
     },
     {
+      title: "类型",
+      dataIndex: "kind",
+      width: 96,
+      render: (_: unknown, r) => <Tag>{r.kind_label}</Tag>,
+    },
+    {
       title: "状态",
       dataIndex: "status",
-      width: 160,
+      width: 150,
       render: (_: unknown, r) => (
         <Tag color={STATUS_COLOR[r.status]}>{r.status_label}</Tag>
       ),
@@ -218,24 +265,50 @@ export default function App(): JSX.Element {
           className="left"
         >
           <Spin spinning={scanning}>
-            {report && report.tasks.length > 0 ? (
-              <Table
-                size="small"
-                rowKey="rel_path"
-                columns={columns}
-                dataSource={report.tasks}
-                pagination={{ pageSize: 50, size: "small" }}
-                onRow={(r) => ({
-                  onClick: () => void pick(r),
-                  style: {
-                    cursor: "pointer",
-                    background: selected?.rel_path === r.rel_path ? "rgba(22,119,255,0.12)" : undefined,
-                  },
-                })}
-              />
-            ) : (
-              <Empty description={report ? "没有找到含 OUTCAR / vasprun.xml 的目录" : "先填路径再扫描"} />
-            )}
+            <Tabs
+              size="small"
+              activeKey={tab}
+              onChange={setTab}
+              items={[
+                {
+                  key: "tasks",
+                  label: `任务 ${report?.tasks.length ?? 0}`,
+                  children:
+                    report && report.tasks.length > 0 ? (
+                      <Table
+                        size="small"
+                        rowKey="rel_path"
+                        columns={columns}
+                        dataSource={report.tasks}
+                        pagination={{ pageSize: 50, size: "small" }}
+                        onRow={(r) => ({
+                          onClick: () => void pick(r),
+                          style: {
+                            cursor: "pointer",
+                            background:
+                              selected?.rel_path === r.rel_path
+                                ? "rgba(22,119,255,0.12)"
+                                : undefined,
+                          },
+                        })}
+                      />
+                    ) : (
+                      <Empty
+                        description={
+                          report
+                            ? "没有找到含 OUTCAR / vasprun.xml 的目录"
+                            : "先填路径再扫描"
+                        }
+                      />
+                    ),
+                },
+                {
+                  key: "stats",
+                  label: "统计",
+                  children: <StatsPanel report={report} />,
+                },
+              ]}
+            />
           </Spin>
         </Card>
 
@@ -250,6 +323,8 @@ export default function App(): JSX.Element {
               loading={sceneLoading}
               sourceName={scene?.source_file ?? null}
               error={sceneError}
+              pbc={pbc}
+              onPbcChange={handlePbcChange}
             />
           </Card>
 

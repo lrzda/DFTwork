@@ -4,6 +4,7 @@ mod convergence;
 mod detect;
 mod elements;
 mod geometry;
+mod incar;
 mod structure;
 mod stubs;
 
@@ -12,5 +13,6 @@ pub use convergence::*;
 pub use detect::*;
 pub use elements::*;
 pub use geometry::*;
+pub use incar::*;
 pub use structure::*;
 pub use stubs::*;

@@ -33,6 +33,10 @@ pub enum Commands {
     Scene {
         /// 结构文件路径，或任务目录（自动挑 POSCAR / CONTCAR）。
         file: String,
+        /// 成键不考虑周期边界：只按真实坐标判断，用于孤立分子 / 团簇。
+        /// 不加这个参数时按周期边界（最小镜像）算——晶体场景的正确做法。
+        #[arg(long)]
+        no_pbc: bool,
     },
 
     /// 探测 Hermes 是否可用（缺席是正常状态）。

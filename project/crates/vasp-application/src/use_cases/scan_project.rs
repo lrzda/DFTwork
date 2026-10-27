@@ -3,7 +3,9 @@ use crate::ports::{Fs, TAIL_PROBE_BYTES};
 use crate::{AppError, AppResult};
 use std::path::{Path, PathBuf};
 use std::time::Instant;
-use vasp_domain::{classify, detect, Clock, EventSink, ProgressEvent};
+use vasp_domain::{
+    classify, detect, detect_task_kind, Clock, EventSink, Incar, ProgressEvent, TaskKind,
+};
 
 /// 扫描时跳过的目录名。这些永远不是 VASP 任务，进去只会拖慢扫描。
 const SKIP_DIRS: [&str; 8] = [
@@ -61,10 +63,11 @@ impl<'a> ScanProject<'a> {
         let tasks = acc
             .tasks
             .into_iter()
-            .map(|(rel, inputs, outputs, record)| {
+            .map(|(rel, kind, inputs, outputs, record)| {
                 TaskSummary::from_parts(
                     rel,
                     record.status,
+                    kind,
                     record.reason,
                     record.evidence,
                     inputs,
@@ -125,14 +128,32 @@ impl<'a> ScanProject<'a> {
                 };
                 let record = classify(&task.outputs, outcar.as_deref(), oszicar.as_deref());
 
+                // 计算类型只依赖 INCAR。INCAR 通常在几 KB 以内，
+                // 但大项目里读 466 次也是一笔开销——所以只在输入确实存在时才读。
+                // 上限 1 MB：真实的 INCAR 不会超过这个量级，超了多半是选错文件。
+                let kind = if task.inputs.incar {
+                    match self.fs.read_text(&dir.join("INCAR"), 1_048_576) {
+                        Ok(text) => detect_task_kind(Some(&Incar::parse(&text))),
+                        // INCAR 读不了（权限/正在写）不该让任务消失，标成未知
+                        Err(_) => TaskKind::Unknown,
+                    }
+                } else {
+                    TaskKind::Unknown
+                };
+
                 if let Some(s) = sink {
                     s.emit(&ProgressEvent::Discovered {
                         rel_path: task.rel_path.clone(),
                         is_task: true,
                     });
                 }
-                acc.tasks
-                    .push((task.rel_path, task.inputs, task.outputs, record));
+                acc.tasks.push((
+                    task.rel_path,
+                    kind,
+                    task.inputs,
+                    task.outputs,
+                    record,
+                ));
             }
             None => {
                 // 只有输入、没有输出 → 未开始的项目，单独列出
@@ -177,6 +198,7 @@ struct Acc {
     dirs_scanned: usize,
     tasks: Vec<(
         String,
+        vasp_domain::TaskKind,
         vasp_domain::InputPresence,
         vasp_domain::OutputPresence,
         vasp_domain::TaskStatusRecord,

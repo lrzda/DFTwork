@@ -69,3 +69,48 @@ impl OutputPresence {
         self.outcar || self.oszicar || self.vasprun
     }
 }
+
+/// 计算类型。由 INCAR 的 `IBRION` / `NSW` / `IMAGES` 推断，
+/// **不读输出文件**——所以「算没算」和「算什么」是两件独立的事。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum TaskKind {
+    /// `IBRION=1/2/3` 且 `NSW>0`：结构优化
+    Relaxation,
+    /// `IBRION=5/6/7/8`：有限差分或 DFPT 频率
+    Frequency,
+    /// `IBRION=0` 且 `NSW>0`：从头算分子动力学
+    Aimd,
+    /// 其余（`IBRION=-1` 或 `NSW=0`）：静态单点 / SCF
+    StaticScf,
+    /// `IMAGES>0`：NEB / CI-NEB
+    Neb,
+    /// INCAR 缺失或读不出来
+    Unknown,
+}
+
+impl TaskKind {
+    pub fn code(&self) -> &'static str {
+        match self {
+            Self::Relaxation => "RELAXATION",
+            Self::Frequency => "FREQUENCY",
+            Self::Aimd => "AIMD",
+            Self::StaticScf => "STATIC_SCF",
+            Self::Neb => "NEB",
+            Self::Unknown => "UNKNOWN",
+        }
+    }
+
+    /// 界面上直接显示的中文名。与 `reference/VASPFlow` 的 label 保持一致，
+    /// 免得同一批数据在两个工具里叫不同名字。
+    pub fn label(&self) -> &'static str {
+        match self {
+            Self::Relaxation => "结构优化",
+            Self::Frequency => "频率 / ZPE",
+            Self::Aimd => "AIMD",
+            Self::StaticScf => "静态 / SCF",
+            Self::Neb => "NEB",
+            Self::Unknown => "未知",
+        }
+    }
+}

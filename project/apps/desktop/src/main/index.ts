@@ -54,6 +54,7 @@ function createWindow(): void {
     if (process.env.DFTWORK_SMOKE_ROOT) query.project = process.env.DFTWORK_SMOKE_ROOT;
     // 冒烟时可指定初始渲染状态，用于截「PBC 关 / 开」这类对比图
     if (process.env.DFTWORK_SMOKE_WRAP) query.wrap = process.env.DFTWORK_SMOKE_WRAP;
+    if (process.env.DFTWORK_SMOKE_TAB) query.tab = process.env.DFTWORK_SMOKE_TAB;
     void win.loadFile(
       path.join(__dirname, "../renderer/index.html"),
       Object.keys(query).length > 0 ? { query } : undefined,

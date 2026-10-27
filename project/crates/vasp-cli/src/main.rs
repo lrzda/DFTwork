@@ -12,7 +12,7 @@ fn main() {
     let result = match args.command {
         Commands::Scan { root, max_depth } => commands::scan(&root, max_depth),
         Commands::Convergence { task } => commands::convergence(&task),
-        Commands::Scene { file } => commands::scene(&file),
+        Commands::Scene { file, no_pbc } => commands::scene(&file, no_pbc),
         Commands::HermesProbe => commands::hermes_probe(),
         Commands::Version => commands::version(),
     };

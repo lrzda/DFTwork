@@ -26,6 +26,13 @@ export interface ConvergenceRequest {
 
 export interface SceneRequest {
   fileAbsPath: string;
+  /**
+   * 成键是否按周期边界计算，默认 `true`。
+   *
+   * - `true`：最小镜像距离，晶体/周期体系用
+   * - `false`：只按真实坐标距离，孤立分子、团簇或想看「盒子里实际摆成什么样」时用
+   */
+  pbc?: boolean;
 }
 
 /** 跨进程边界不抛异常，只回信封——Electron 会把异常变成没有 code 的字符串。 */

@@ -56,8 +56,8 @@ export const api = {
     unwrap(bridge().scan({ root, maxDepth })),
   convergence: (taskAbsPath: string): Promise<ConvergenceSeries> =>
     unwrap(bridge().convergence({ taskAbsPath })),
-  scene: (fileAbsPath: string): Promise<StructureScene> =>
-    unwrap(bridge().scene({ fileAbsPath })),
+  scene: (fileAbsPath: string, pbc = true): Promise<StructureScene> =>
+    unwrap(bridge().scene({ fileAbsPath, pbc })),
 };
 
 /** 把任意异常转成一句人话，用于界面提示。 */

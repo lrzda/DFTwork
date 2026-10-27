@@ -1,7 +1,7 @@
 use crate::ports::{Fs, MAX_FULL_READ};
 use crate::{AppError, AppResult};
 use std::path::Path;
-use vasp_domain::{parse_poscar, StructureScene};
+use vasp_domain::{parse_poscar_with, BondMode, StructureScene};
 
 /// 结构文件按优先级尝试的顺序。
 ///
@@ -20,14 +20,15 @@ impl<'a> GetStructureScene<'a> {
     }
 
     /// `path` 可以是结构文件本身，也可以是任务目录（自动挑 POSCAR / CONTCAR）。
-    pub fn execute(&self, path: &Path) -> AppResult<StructureScene> {
+    ///
+    /// `mode` 决定成键是否考虑周期边界——见 [`BondMode`]。
+    pub fn execute(&self, path: &Path, mode: BondMode) -> AppResult<StructureScene> {
         let file = self.resolve(path)?;
         let text = self
             .fs
             .read_text(&file, MAX_FULL_READ)
             .map_err(|e| AppError::io(file.display().to_string(), e))?;
-        let scene = parse_poscar(&text)?;
-        let mut scene = scene;
+        let mut scene = parse_poscar_with(&text, mode)?;
         scene.source_file = file
             .file_name()
             .map(|n| n.to_string_lossy().to_string());

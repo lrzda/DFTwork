@@ -41,6 +41,9 @@ export interface TaskSummary {
   status: TaskStatusCode;
   /** 中文状态文案。由后端给，前端不要自己判断状态拼文案。 */
   status_label: string;
+  /** 计算类型码，由 INCAR 的 IBRION/NSW/IMAGES 推断。 */
+  kind: TaskKindCode;
+  kind_label: string;
   reason: string;
   evidence: StatusEvidence[];
   inputs: InputPresence;
@@ -49,6 +52,14 @@ export interface TaskSummary {
   outputs: OutputPresence;
   observed_at: string | null;
 }
+
+export type TaskKindCode =
+  | "RELAXATION"
+  | "STATIC_SCF"
+  | "NEB"
+  | "FREQUENCY"
+  | "AIMD"
+  | "UNKNOWN";
 
 export interface ScanReport {
   root: string;

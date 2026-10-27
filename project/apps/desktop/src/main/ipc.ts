@@ -45,7 +45,10 @@ export function registerIpc(): void {
     wrap(() => callCore(["convergence", req.taskAbsPath])),
   );
 
-  ipcMain.handle(IPC.scene, (_e, req: SceneRequest) =>
-    wrap(() => callCore(["scene", req.fileAbsPath])),
-  );
+  ipcMain.handle(IPC.scene, (_e, req: SceneRequest) => {
+    // 默认按周期边界算成键；显式传 false 才用真实坐标
+    const args = ["scene", req.fileAbsPath];
+    if (req.pbc === false) args.push("--no-pbc");
+    return wrap(() => callCore(args));
+  });
 }

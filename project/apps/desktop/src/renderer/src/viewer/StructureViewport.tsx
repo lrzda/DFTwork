@@ -16,6 +16,15 @@ interface Props {
   sourceName: string | null;
   /** 出错信息（例如目录里没有结构文件）。 */
   error: string | null;
+  /**
+   * PBC 模式：开启时原子折回原胞、成键按最小镜像距离；
+   * 关闭时原子保持真实坐标、成键只看真实距离。
+   *
+   * 这个状态由父组件持有，因为切换它需要**重新向内核请求场景**
+   * （成键判据也跟着变），不是纯渲染层能决定的事。
+   */
+  pbc: boolean;
+  onPbcChange: (v: boolean) => void;
 }
 
 /**
@@ -24,15 +33,25 @@ interface Props {
  * 这个组件**不认识 three.js**：它只做三件事——把容器交出去、把数据递进去、
  * 卸载时让渲染器释放资源。所有绘制细节在 `ThreeRenderer` 里。
  */
-export function StructureViewport({ scene, loading, sourceName, error }: Props): JSX.Element {
+export function StructureViewport({
+  scene,
+  loading,
+  sourceName,
+  error,
+  pbc,
+  onPbcChange,
+}: Props): JSX.Element {
   const hostRef = useRef<HTMLDivElement | null>(null);
   const rendererRef = useRef<ThreeRenderer | null>(null);
   const [ready, setReady] = useState(false);
-  // 初始状态可由 `?wrap=1` 指定（冒烟截图 / 分享链接用），默认关闭
-  const [options, setOptions] = useState<RenderOptions>(() => ({
-    ...DEFAULT_OPTIONS,
-    wrapPbc: new URLSearchParams(window.location.search).get("wrap") === "1",
-  }));
+  const [options, setOptions] = useState<RenderOptions>({ ...DEFAULT_OPTIONS });
+
+  // 渲染选项里的 wrapPbc 跟随父组件的 PBC 状态：
+  // 内核已经按同一模式算好成键，显示与判定必须一致，否则会出现
+  // 「原子折回了、键却按真实坐标连」这种自相矛盾的画面。
+  useEffect(() => {
+    setOptions((o) => (o.wrapPbc === pbc ? o : { ...o, wrapPbc: pbc }));
+  }, [pbc]);
 
   // 挂载一次：建渲染器，卸载时销毁（不销毁会泄漏 WebGL 上下文，切几次任务就白屏）
   useEffect(() => {
@@ -104,7 +123,7 @@ export function StructureViewport({ scene, loading, sourceName, error }: Props):
             {scene.bonds.length > 0 ? ` · ${scene.bonds.length} 根键` : " · 暂无成键信息"}
           </Text>
         )}
-        {outsideCount > 0 && !options.wrapPbc && (
+        {outsideCount > 0 && !pbc && (
           <Tooltip title="这些原子的分数坐标落在 [0,1) 之外（MD 快照与优化后的结构很常见）。打开 PBC 开关可把它们折回原胞——代价是跨越边界的分子会被劈开">
             <Tag color="orange" style={{ cursor: "help", margin: 0 }}>
               {outsideCount} 个在盒外
@@ -121,25 +140,25 @@ export function StructureViewport({ scene, loading, sourceName, error }: Props):
           <Space size={10}>
             <Tooltip
               title={
-                options.wrapPbc
-                  ? "已把所有原子折回 [0,1) 分数区间。跨界分子会被劈成两半"
-                  : "把落在盒外的原子折回原胞（按 PBC 平移整数个晶格矢量）"
+                pbc
+                  ? "PBC 开启：原子折回原胞，成键按最小镜像距离（跨界相邻的原子算成键）"
+                  : "PBC 关闭：原子保持真实坐标，成键只看真实距离（不跨周期）"
               }
             >
               <Space size={4} style={{ cursor: "help" }}>
                 <Text
                   style={{
                     fontSize: 12,
-                    color: options.wrapPbc ? "#69b1ff" : "#8b9bb4",
+                    color: pbc ? "#69b1ff" : "#8b9bb4",
                     userSelect: "none",
                   }}
                 >
-                  PBC 折回
+                  PBC
                 </Text>
                 <Switch
                   size="small"
-                  checked={options.wrapPbc}
-                  onChange={(v) => setOptions((o) => ({ ...o, wrapPbc: v }))}
+                  checked={pbc}
+                  onChange={onPbcChange}
                 />
               </Space>
             </Tooltip>

@@ -1,5 +1,5 @@
 use serde::Serialize;
-use vasp_domain::{InputPresence, OutputPresence, StatusEvidence, TaskStatus};
+use vasp_domain::{InputPresence, OutputPresence, StatusEvidence, TaskKind, TaskStatus};
 
 /// 扫描出来的一个任务。**这是给界面看的形状**，不是领域实体。
 ///
@@ -10,6 +10,9 @@ pub struct TaskSummary {
     /// 机器可读码，见 [`TaskStatus::code`]。
     pub status: &'static str,
     pub status_label: &'static str,
+    /// 计算类型码，见 [`TaskKind::code`]。由 INCAR 推断，与「算完没」无关。
+    pub kind: &'static str,
+    pub kind_label: &'static str,
     pub reason: String,
     pub evidence: Vec<StatusEvidence>,
     pub inputs: InputPresence,
@@ -23,6 +26,7 @@ impl TaskSummary {
     pub fn from_parts(
         rel_path: String,
         status: TaskStatus,
+        kind: TaskKind,
         reason: String,
         evidence: Vec<StatusEvidence>,
         inputs: InputPresence,
@@ -33,6 +37,8 @@ impl TaskSummary {
             rel_path,
             status: status.code(),
             status_label: status.label_zh(),
+            kind: kind.code(),
+            kind_label: kind.label(),
             reason,
             evidence,
             inputs,

@@ -8,6 +8,14 @@ use crate::{Atom, Bond, DomainError, DomainResult, StructureScene};
 /// 含/不含 Selective dynamics 四种组合。
 /// **不处理**：负数缩放因子（按目标体积给定），遇到时返回错误而不是猜。
 pub fn parse_poscar(text: &str) -> DomainResult<StructureScene> {
+    parse_poscar_with(text, BondMode::Periodic)
+}
+
+/// 与 [`parse_poscar`] 相同，但可以指定成键是否按周期边界计算。
+///
+/// 默认（[`parse_poscar`]）按周期边界——对晶体这是唯一正确的做法。
+/// 只有明确要看「孤立分子 / 团簇的真实摆法」时才传 [`BondMode::Real`]。
+pub fn parse_poscar_with(text: &str, bond_mode: BondMode) -> DomainResult<StructureScene> {
     let lines: Vec<&str> = text
         .lines()
         .map(|l| l.trim_end_matches(['\r', '\n']))
@@ -159,7 +167,7 @@ pub fn parse_poscar(text: &str) -> DomainResult<StructureScene> {
     // 场景要给前端直接画，所以成键在这里一次算完。
     // 算不出来（坏晶格、原子过多）就当没有键——宁可少画几十根线，
     // 也不要因为成键失败让用户连结构都看不到。
-    scene.bonds = bonds(&scene).unwrap_or_default();
+    scene.bonds = bonds(&scene, bond_mode).unwrap_or_default();
     Ok(scene)
 }
 
@@ -175,6 +183,26 @@ fn parse_counts(row: &[&str]) -> DomainResult<Vec<usize>> {
         return Err(DomainError::InvalidStructure("原子数行为空".into()));
     }
     Ok(out)
+}
+
+/// 成键是否按周期边界计算。
+///
+/// - [`BondMode::Periodic`]：按**最小镜像距离**判断。晶体、周期性体系用这个——
+///   跨边界相邻的两个原子确实成键，不能因为它们在盒子的两侧就漏掉。
+/// - [`BondMode::Real`]：只按**真实坐标距离**判断，不考虑任何周期平移。
+///   孤立分子、团簇、或者你想看「盒子里实际摆成什么样」时用这个。
+///
+/// 两者的区别只在少数跨界原子对上，但恰恰是这些原子决定了图看起来对不对。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BondMode {
+    Periodic,
+    Real,
+}
+
+impl BondMode {
+    pub fn is_periodic(self) -> bool {
+        matches!(self, Self::Periodic)
+    }
 }
 
 /// 成键判据的容差系数。
@@ -212,7 +240,7 @@ pub const BOND_ATOM_LIMIT: usize = 2048;
 ///
 /// 退化情况一律返回空而不是报错：晶格不可逆、原子过多、原子数小于 2。
 /// 调用方拿到空 `bonds` 时应降级为「只画原子」。
-pub fn bonds(scene: &StructureScene) -> DomainResult<Vec<Bond>> {
+pub fn bonds(scene: &StructureScene, mode: BondMode) -> DomainResult<Vec<Bond>> {
     let n = scene.atoms.len();
     if n < 2 || n > BOND_ATOM_LIMIT {
         return Ok(Vec::new());
@@ -224,11 +252,16 @@ pub fn bonds(scene: &StructureScene) -> DomainResult<Vec<Bond>> {
         return Ok(Vec::new());
     };
 
-    let frac: Vec<Vec3> = scene
-        .atoms
-        .iter()
-        .map(|a| to_fractional(&inv, &a.position))
-        .collect();
+    // 分数坐标只在周期性模式下需要
+    let frac: Vec<Vec3> = if mode.is_periodic() {
+        scene
+            .atoms
+            .iter()
+            .map(|a| to_fractional(&inv, &a.position))
+            .collect()
+    } else {
+        Vec::new()
+    };
     let radii: Vec<f64> = scene
         .atoms
         .iter()
@@ -242,7 +275,16 @@ pub fn bonds(scene: &StructureScene) -> DomainResult<Vec<Bond>> {
             if threshold <= 0.0 {
                 continue;
             }
-            if min_image_distance(&frac[i], &frac[j], &lattice) < threshold {
+            let distance = if mode.is_periodic() {
+                min_image_distance(&frac[i], &frac[j], &lattice)
+            } else {
+                // 真实坐标：直接量笛卡尔距离，不做任何周期平移
+                let pi = &scene.atoms[i].position;
+                let pj = &scene.atoms[j].position;
+                let d = [pj[0] - pi[0], pj[1] - pi[1], pj[2] - pi[2]];
+                (d[0] * d[0] + d[1] * d[1] + d[2] * d[2]).sqrt()
+            };
+            if distance < threshold {
                 out.push(Bond { a: i, b: j });
             }
         }

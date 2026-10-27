@@ -1,4 +1,4 @@
-use vasp_domain::Hermes;
+use vasp_domain::{BondMode, Hermes};
 use vasp_infrastructure::{HermesCli, LocalFs};
 use vasp_application::{GetConvergence, GetStructureScene, ScanProject};
 
@@ -30,9 +30,14 @@ pub fn convergence(task: &str) -> anyhow::Result<()> {
     emit(&serde_json::json!({ "ok": true, "data": series }))
 }
 
-pub fn scene(file: &str) -> anyhow::Result<()> {
+pub fn scene(file: &str, no_pbc: bool) -> anyhow::Result<()> {
     let fs = LocalFs::new();
-    let scene = GetStructureScene::new(&fs).execute(Path::new(file))?;
+    let mode = if no_pbc {
+        BondMode::Real
+    } else {
+        BondMode::Periodic
+    };
+    let scene = GetStructureScene::new(&fs).execute(Path::new(file), mode)?;
     emit(&serde_json::json!({ "ok": true, "data": scene }))
 }
 
