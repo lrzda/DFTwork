@@ -4,16 +4,18 @@
 
 单人工期估计，按"能跑通真实项目"为完成标准，不含美化与文档打磨。
 
-| 里程碑 | 内容 | 工期 | 交付物 |
-|---|---|---|---|
-| **M0 骨架** | monorepo（pnpm workspace）、electron-vite、单实例锁、IPC ping、日志；**Electron 空壳基线：安装包 / 安装后体积 / 空载内存 / 冷启动** | 1–2 天 | 能启动的空窗口 + `window.dftwork.ping()` + 体积基线表 |
-| **M1 Rust 内核重写** | R0：workspace + CLI 契约 + golden 脚本；R1：解析（POSCAR/OSZICAR/OUTCAR/INCAR）；R2：规则（状态/成键/校验/计划）；R3：用例 + infrastructure；R4：对拍收口 + 性能调优 | **5.5–7.5 周**（见 [rust-rewrite.md](rust-rewrite.md)） | `vaspcore.exe` 通过 scan/convergence/scene/files/read/build/check/discover；对拍零差异 |
-| **M2 查看器** | 扫描增量事件、任务树/表、状态点、收敛图、3D 结构（`SceneRenderer` 接口 + `ThreeRenderer`）、文件浏览预览 | 5–7 天 | 打开真实项目可用 |
+| 里程碑 | 内容 | 工期 | 交付物 | 状态 |
+|---|---|---|---|---|
+| **M0 骨架** | monorepo（pnpm workspace）、electron-vite、单实例锁、IPC ping、日志；**Electron 空壳基线** | 1–2 天 | 能启动的空窗口 + `window.dftwork.ping()` | ✅ 完成 |
+| **M1 Rust 内核重写** | R0–R2：workspace、CLI 契约、解析、状态/成键判定；R3：8 个用例 + infrastructure；R4：对拍收口 | **5.5–7.5 周**（见 [rust-rewrite.md](rust-rewrite.md)） | `vaspcore.exe` 9 个子命令；对拍零差异 | 🟡 解析与查看侧完成，构建侧（build/check/discover）未做 |
+| **M2 查看器** | 任务表、统计看板、收敛图、3D 结构（`SceneRenderer` + `ThreeRenderer`）；文件浏览待做 | 5–7 天 | 打开真实项目可用 | ✅ 完成（文件浏览除外） |
+| **M2.5 属性面板** | SCF 电子步、每原子力、应力、振动频率、力常数、磁矩、多任务对比 | 4–5 天 | 六项属性 + 对比页 | ✅ 完成，真实数据验证 |
 | **M3 AI 通道** | 能力探测、HermesAdapter、JSONL 解析、AnalysisBundle、AiPanel、会话续接、Hermes 插件（12 工具转调 core CLI） | 4–6 天 | 点「分析此任务」出结果；AI 能调 `vasp_*` 工具；无 Hermes 时降级 |
 | **M4 构建与放行** | BuildPlan、diff 预览、planHash 放行、内容寻址备份、回执、回滚；备份清理策略（500 MB / 30 天 / 5 版） | 5–7 天 | 批量生成输入并可回滚；单次写入备份 < 2 MB |
 | **M5 打包** | electron-builder（NSIS + portable）、首启引导、许可与 NOTICE | 2–3 天 | 干净机器可安装运行 |
 
-合计约 **45–65 个工作日**（约 9–13 周），其中 M1 Rust 重写占 5.5–7.5 周。M0–M2 完成后可见到可用的查看器（约 7–9 周）。
+合计约 **45–65 个工作日**（约 9–13 周），其中 M1 Rust 重写占 5.5–7.5 周。
+**M0–M2.5 已完成**，查看侧全部可用；剩余 M3（AI）、M4（构建放行）、M5（打包）。
 
 ## 2. 验收标准（可测，不写"体验良好"这类话）
 
@@ -75,7 +77,9 @@
 
 ## 5. 明确不做（首版）
 
-- SCF 电子步序列、XDATCAR 轨迹播放（留接口，见 `architecture.md §8`）
+- XDATCAR 轨迹播放（留接口，见 `architecture.md §14`）
+- 热力学量（ZPE / S / G(T)）——VASP 只有 Γ 点简谐近似，完整计算需 phonopy
+- 逐原子磁矩（当前数据源没有 `magnetization (x)` 表，接口已留；需 `LORBIT=11`）
 - 集群作业提交/监控（作业由外部工具管理，软件只读结果）
 - 多用户/权限/云同步
 - 自动更新（首版手动下载新版本）

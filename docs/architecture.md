@@ -169,7 +169,7 @@ ports/      HermesPort, ProjectStorePort, FileWriterPort, ClockPort, LoggerPort,
 | 适配器 | 实现 | 说明 |
 |---|---|---|
 | `LocalFs` | `vasp_application::ports::Fs` | 遍历、读文本、尾部读取；UTF-8 失败退 GBK |
-| `PlanWriter` | `FileWriterPort` | 备份 → 写临时 → rename → 回执；**唯一落盘点**（首版未实现） |
+| `PlanWriter` | `FileWriterPort` | 备份 → 写临时 → rename → 回执；**唯一落盘点**（M4，未实现） |
 | `HermesCliAdapter` | `HermesPort` | 探测、spawn、JSONL 解析、会话、超时 |
 | `JsonProjectStore` | `ProjectStorePort` | 原子写、最近项目、会话映射 |
 | `FileLogger` / `SystemClock` | `LoggerPort` / `ClockPort` | 分级轮转 / 可注入固定时间 |
@@ -322,6 +322,9 @@ ApproveBuild → PlanHashPolicy.assert_match → writer.apply() 备份+写入+�
 **体积这件事要说清**：Electron 安装包的 85% 是 Chromium + V8 + Node（110–130 MB），业务代码压缩后 0.3–0.6 MB（<1%）。把业务代码全删到零，仍是 120 MB。**体积由运行时决定，换语言无效**——Rust 内核让安装包多 3–6 MB，换来的是性能与隔离，不是更小。要小只能换壳（Tauri 30–40 MB），代价是前端重写。测算表见 [ADR-010](decisions.md#adr-010-桌面外壳用-electron内核用-rust-重写)。
 
 ## 14. 首版不做、但留接口
+
+> 注：本节写于设计阶段。其中 **SCF 电子步已在 M2.5 实现**（`scf` 子命令 + 面板）；
+> 逐原子磁矩的接口（`MagnetizationReport::per_atom_available`）已按本意保留。
 
 | 功能 | 预留方式 | 实现时只需 |
 |---|---|---|

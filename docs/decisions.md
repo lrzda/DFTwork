@@ -115,7 +115,10 @@
 - 12 个 `vasp_*` 工具（含 `build_inputs` / `check_inputs`）
 - 3 个 skills 与 persona（二期随 Hermes 插件发布）
 
-**不做**：SCF 电子步序列、XDATCAR 轨迹播放。按 `architecture.md §8` 留接口与类型占位。
+**当时计划不做**：SCF 电子步序列、XDATCAR 轨迹播放。
+
+**后续变更**：SCF 电子步已在 M2.5 实现（OSZICAR 流式解析 + 对数残差曲线）。
+XDATCAR 仍不做，接口保留。
 
 **后果**：首版工期可控；后续加功能不需要改 IPC 契约（只增字段）。
 
