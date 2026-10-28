@@ -16,6 +16,9 @@ export const IPC = {
   vibrations: "core:vibrations",
   magnetization: "core:magnetization",
   compare: "core:compare",
+  build: "core:build",
+  apply: "core:apply",
+  rollback: "core:rollback",
 } as const;
 
 export type IpcChannel = (typeof IPC)[keyof typeof IPC];
@@ -38,6 +41,26 @@ export interface SceneRequest {
    * - `false`：只按真实坐标距离，孤立分子、团簇或想看「盒子里实际摆成什么样」时用
    */
   pbc?: boolean;
+}
+
+/** 以模板任务生成输入计划。 */
+export interface BuildRequest {
+  root: string;
+  /** 源任务，相对 root。 */
+  sourceRel: string;
+  /** 目标任务目录，相对 root。 */
+  targetRel: string;
+  /** INCAR 参数覆盖。 */
+  overrides: [string, string][];
+}
+
+/** 放行一份计划。整个计划随请求传输，内核写临时文件后再执行。 */
+export interface ApplyRequest {
+  plan: import("./dto").BuildPlan;
+}
+
+export interface RollbackRequest {
+  receipt: import("./dto").BuildReceipt;
 }
 
 /** 多任务对比。至少两个路径。 */
@@ -73,4 +96,7 @@ export interface DftworkApi {
   vibrations(req: TaskRequest): Promise<Envelope<import("./dto").VibrationReport>>;
   magnetization(req: TaskRequest): Promise<Envelope<import("./dto").MagnetizationReport>>;
   compare(req: CompareRequest): Promise<Envelope<import("./dto").CompareReport>>;
+  build(req: BuildRequest): Promise<Envelope<import("./dto").BuildPlan>>;
+  apply(req: ApplyRequest): Promise<Envelope<import("./dto").BuildReceipt>>;
+  rollback(req: RollbackRequest): Promise<Envelope<import("./dto").RollbackReport>>;
 }

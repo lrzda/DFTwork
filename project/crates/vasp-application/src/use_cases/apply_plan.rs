@@ -48,7 +48,37 @@ impl<'a> ApplyPlan<'a> {
         for item in &plan.items {
             let target = root.join(&item.rel_path);
 
-            match item.action {
+            // 计划是生成时的快照，而磁盘可能在这之后变了（用户手动建了文件、
+            // 另一个进程写了东西、上次 apply 没回滚干净）。
+            // 所以执行时必须重新判定，并且**只允许**写用户批准过的那种情形：
+            //   plan=create  + 目标已存在且内容不同 → 拒绝（用户没批准覆盖）
+            //   plan=skip    + 目标已变           → 拒绝（用户以为不用动）
+            //   plan=overwrite + 目标消失          → 当 create 处理（无害）
+            let actual = if !self.fs.exists(&target) {
+                WriteAction::Create
+            } else {
+                let old = self.fs.read_text(&target, MAX_FULL_READ)?;
+                if old == item.content {
+                    WriteAction::Skip
+                } else {
+                    match item.action {
+                        WriteAction::Overwrite => WriteAction::Overwrite,
+                        _ => {
+                            return Err(AppError::Conflict(format!(
+                                "{} 在放行后被创建或改动，原计划是「{}」，拒绝覆盖。请重新生成计划。",
+                                item.rel_path,
+                                match item.action {
+                                    WriteAction::Create => "新建",
+                                    WriteAction::Skip => "不动",
+                                    WriteAction::Overwrite => "覆盖",
+                                }
+                            )))
+                        }
+                    }
+                }
+            };
+
+            match actual {
                 WriteAction::Skip => {
                     skipped.push(item.rel_path.clone());
                     continue;

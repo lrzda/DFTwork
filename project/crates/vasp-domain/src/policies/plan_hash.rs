@@ -55,6 +55,7 @@ mod tests {
             content: content.into(),
             action: WriteAction::Create,
             reason: "test".into(),
+            previous_content: None,
         }
     }
 

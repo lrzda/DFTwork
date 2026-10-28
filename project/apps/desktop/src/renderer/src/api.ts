@@ -1,4 +1,6 @@
 import type {
+  BuildPlan,
+  BuildReceipt,
   CompareReport,
   ConvergenceSeries,
   DftworkApi,
@@ -8,6 +10,7 @@ import type {
   HermesCapability,
   MagnetizationReport,
   ScanReport,
+  RollbackReport,
   ScfSeries,
   StructureScene,
   VersionInfo,
@@ -72,6 +75,15 @@ export const api = {
     unwrap(bridge().magnetization({ taskAbsPath })),
   compare: (taskAbsPaths: string[]): Promise<CompareReport> =>
     unwrap(bridge().compare({ taskAbsPaths })),
+  build: (
+    root: string,
+    sourceRel: string,
+    targetRel: string,
+    overrides: [string, string][],
+  ): Promise<BuildPlan> => unwrap(bridge().build({ root, sourceRel, targetRel, overrides })),
+  apply: (plan: BuildPlan): Promise<BuildReceipt> => unwrap(bridge().apply({ plan })),
+  rollback: (receipt: BuildReceipt): Promise<RollbackReport> =>
+    unwrap(bridge().rollback({ receipt })),
 };
 
 /** 把任意异常转成一句人话，用于界面提示。 */

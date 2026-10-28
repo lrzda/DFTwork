@@ -1,4 +1,6 @@
-import { ipcMain } from "electron";
+import { app, ipcMain } from "electron";
+import fs from "node:fs/promises";
+import path from "node:path";
 import {
   DftworkError,
   IPC,
@@ -6,7 +8,10 @@ import {
   type ErrorPayload,
   type SceneRequest,
   type ScanRequest,
+  type ApplyRequest,
+  type BuildRequest,
   type CompareRequest,
+  type RollbackRequest,
   type TaskRequest,
 } from "@dftwork/shared";
 import { callCore } from "./core";
@@ -70,4 +75,32 @@ export function registerIpc(): void {
   ipcMain.handle(IPC.compare, (_e, req: CompareRequest) =>
     wrap(() => callCore(["compare", ...req.taskAbsPaths])),
   );
+
+  ipcMain.handle(IPC.build, (_e, req: BuildRequest) => {
+    const args = ["build", req.sourceRel, req.targetRel, "--root", req.root];
+    for (const [k, v] of req.overrides) args.push("--set", `${k}=${v}`);
+    return wrap(() => callCore(args));
+  });
+
+  // 内核的 apply/rollback 读文件，而计划体积可能超命令行长度上限，
+  // 所以这里落一个临时 JSON 交给它，执行完就删。
+  ipcMain.handle(IPC.apply, async (_e, req: ApplyRequest) => {
+    const tmp = path.join(app.getPath("temp"), `dftwork-plan-${Date.now()}.json`);
+    await fs.writeFile(tmp, JSON.stringify(req.plan), "utf8");
+    try {
+      return await wrap(() => callCore(["apply", tmp], 120_000));
+    } finally {
+      await fs.unlink(tmp).catch(() => undefined);
+    }
+  });
+
+  ipcMain.handle(IPC.rollback, async (_e, req: RollbackRequest) => {
+    const tmp = path.join(app.getPath("temp"), `dftwork-receipt-${Date.now()}.json`);
+    await fs.writeFile(tmp, JSON.stringify(req.receipt), "utf8");
+    try {
+      return await wrap(() => callCore(["rollback", tmp], 120_000));
+    } finally {
+      await fs.unlink(tmp).catch(() => undefined);
+    }
+  });
 }

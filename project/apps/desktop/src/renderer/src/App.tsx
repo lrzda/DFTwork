@@ -5,6 +5,7 @@ import {
   Card,
   Empty,
   Input,
+  Modal,
   Space,
   Spin,
   Table,
@@ -23,12 +24,15 @@ import {
   YAxis,
 } from "recharts";
 import type {
+  BuildPlan,
+  BuildReceipt,
   CompareReport,
   ConvergenceSeries,
   ForcesResponse,
   HermesCapability,
   MagnetizationReport,
   ScanReport,
+  RollbackReport,
   ScfSeries,
   StructureScene,
   TaskStatusCode,
@@ -37,6 +41,7 @@ import type {
   VibrationReport,
 } from "@dftwork/shared";
 import { api, describeError } from "./api";
+import { BuildPanel } from "./BuildPanel";
 import {
   ComparePanel,
   ForcePanel,
@@ -57,7 +62,8 @@ type PanelKey =
   | "vibration"
   | "force"
   | "magnetization"
-  | "compare";
+  | "compare"
+  | "build";
 
 const STATUS_COLOR: Record<TaskStatusCode, string> = {
   TASK_COMPLETED: "green",
@@ -104,6 +110,14 @@ export default function App(): JSX.Element {
   /** 左侧表格里勾选的任务（rel_path），用于多任务对比。 */
   const [checked, setChecked] = useState<string[]>([]);
   const [compareData, setCompareData] = useState<CompareReport | null>(null);
+  // 构建与放行
+  const [plan, setPlan] = useState<BuildPlan | null>(null);
+  const [receipt, setReceipt] = useState<BuildReceipt | null>(null);
+  const [rollbackReport, setRollbackReport] = useState<RollbackReport | null>(null);
+  const [buildOpen, setBuildOpen] = useState(false);
+  const [buildBusy, setBuildBusy] = useState(false);
+  const [targetDir, setTargetDir] = useState("");
+  const [overrideText, setOverrideText] = useState("ENCUT = 520");
   const [error, setError] = useState<string | null>(null);
   const [ver, setVer] = useState<VersionInfo | null>(null);
   const [hermes, setHermes] = useState<HermesCapability | null>(null);
@@ -203,6 +217,66 @@ export default function App(): JSX.Element {
     [selected, fetchScene],
   );
 
+  /** 打开「以此为模板」弹窗，默认目标目录名由源任务推导。 */
+  const openBuild = useCallback(() => {
+    if (!selected) return;
+    setTargetDir(`${selected.rel_path}-copy`);
+    setBuildOpen(true);
+  }, [selected]);
+
+  /** 生成计划（不落盘）。 */
+  const doBuild = useCallback(async (): Promise<void> => {
+    if (!selected) return;
+    const overrides: [string, string][] = overrideText
+      .split("\n")
+      .map((line) => line.trim())
+      .filter((line) => line.length > 0 && line.includes("="))
+      .map((line) => {
+        const i = line.indexOf("=");
+        return [line.slice(0, i).trim(), line.slice(i + 1).trim()] as [string, string];
+      });
+
+    setBuildBusy(true);
+    try {
+      const p = await api.build(bootProject, selected.rel_path, targetDir.trim(), overrides);
+      setPlan(p);
+      setReceipt(null);
+      setRollbackReport(null);
+      setBuildOpen(false);
+      setRightTab("build");
+    } catch (e) {
+      setError(describeError(e));
+    } finally {
+      setBuildBusy(false);
+    }
+  }, [selected, bootProject, targetDir, overrideText]);
+
+  const doApply = useCallback(async (): Promise<void> => {
+    if (!plan) return;
+    setBuildBusy(true);
+    try {
+      const r = await api.apply(plan);
+      setReceipt(r);
+      setPlan(null);
+    } catch (e) {
+      setError(describeError(e));
+    } finally {
+      setBuildBusy(false);
+    }
+  }, [plan]);
+
+  const doRollback = useCallback(async (): Promise<void> => {
+    if (!receipt) return;
+    setBuildBusy(true);
+    try {
+      setRollbackReport(await api.rollback(receipt));
+    } catch (e) {
+      setError(describeError(e));
+    } finally {
+      setBuildBusy(false);
+    }
+  }, [receipt]);
+
   /** 对比勾选的任务。至少两个才有意义。 */
   const doCompare = useCallback(async (): Promise<void> => {
     if (!report || checked.length < 2) return;
@@ -282,6 +356,29 @@ export default function App(): JSX.Element {
     if (!report || checked.length < 2 || compareData) return;
     void doCompare();
   }, [report, checked, compareData, doCompare]);
+
+  // `?build=<目标目录>`：自动生成一份计划并切到构建页（截图与演示用）。
+  // 注意 build 只产出计划、**不写盘**，对真实项目调用是安全的。
+  useEffect(() => {
+    if (!selected || plan || receipt) return;
+    const target = new URLSearchParams(window.location.search).get("build");
+    if (!target) return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const p = await api.build(bootProject, selected.rel_path, target, [["ENCUT", "520"]]);
+        if (!cancelled) {
+          setPlan(p);
+          setRightTab("build");
+        }
+      } catch (e) {
+        if (!cancelled) setError(describeError(e));
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [selected, bootProject, plan, receipt]);
 
   // 冒烟模式：扫完自动选中一个任务，让面板有内容可截。
   // `?task=<rel_path>` 可指定具体任务；否则选第一个已完成的。
@@ -387,11 +484,18 @@ export default function App(): JSX.Element {
           }
           className="left"
           extra={
-            checked.length >= 2 ? (
-              <Button size="small" type="primary" onClick={() => void doCompare()}>
-                对比这 {checked.length} 个
-              </Button>
-            ) : null
+            <Space size={6}>
+              {selected && checked.length < 2 && (
+                <Button size="small" onClick={openBuild}>
+                  以此为模板
+                </Button>
+              )}
+              {checked.length >= 2 && (
+                <Button size="small" type="primary" onClick={() => void doCompare()}>
+                  对比这 {checked.length} 个
+                </Button>
+              )}
+            </Space>
           }
         >
           <Spin spinning={scanning}>
@@ -527,6 +631,25 @@ export default function App(): JSX.Element {
                 label: "对比",
                 children: <ComparePanel data={compareData} />,
               },
+              {
+                key: "build",
+                label: "构建",
+                children: (
+                  <BuildPanel
+                    plan={plan}
+                    receipt={receipt}
+                    rollbackReport={rollbackReport}
+                    busy={buildBusy}
+                    onApply={() => void doApply()}
+                    onRollback={() => void doRollback()}
+                    onDiscard={() => {
+                      setPlan(null);
+                      setReceipt(null);
+                      setRollbackReport(null);
+                    }}
+                  />
+                ),
+              },
             ]}
           />
           {panelLoading && (
@@ -536,6 +659,39 @@ export default function App(): JSX.Element {
           )}
         </Card>
       </div>
+
+      <Modal
+        title="以此为模板生成新输入"
+        open={buildOpen}
+        onOk={() => void doBuild()}
+        onCancel={() => setBuildOpen(false)}
+        okText="生成计划"
+        cancelText="取消"
+        confirmLoading={buildBusy}
+        width={560}
+      >
+        <Space direction="vertical" size={10} style={{ width: "100%" }}>
+          <Text type="secondary" style={{ fontSize: 12 }}>
+            源任务：<Text code>{selected?.rel_path ?? ""}</Text>
+          </Text>
+          <Input
+            addonBefore="目标目录"
+            value={targetDir}
+            onChange={(e) => setTargetDir(e.target.value)}
+            placeholder="例如 task-ENCUT520"
+          />
+          <Input.TextArea
+            rows={5}
+            value={overrideText}
+            onChange={(e) => setOverrideText(e.target.value)}
+            placeholder={"每行一个参数，例如\nENCUT = 520\nISMEAR = 0"}
+          />
+          <Text type="secondary" style={{ fontSize: 12 }}>
+            复制 INCAR / POSCAR / KPOINTS（不含 POTCAR）。注释和原有行序会保留，
+            diff 里只会看到真正改动的行。生成的是**计划**，放行后才写盘。
+          </Text>
+        </Space>
+      </Modal>
     </div>
   );
 }

@@ -70,6 +70,23 @@ pub enum Commands {
         tasks: Vec<String>,
     },
 
+    /// 以某个任务为模板生成一份输入计划（只产出计划，不落盘）。
+    Build {
+        /// 源任务目录（绝对路径，或相对 --root）。
+        source: String,
+        /// 目标任务目录（相对 --root）。
+        target: String,
+        /// INCAR 参数覆盖，可重复：--set ENCUT=520 --set ISMEAR=0
+        #[arg(long = "set", value_name = "KEY=VALUE")]
+        set: Vec<String>,
+        /// 项目根；缺省取源任务目录的父目录。
+        #[arg(long)]
+        root: Option<String>,
+        /// 只复制这些文件（默认 INCAR/POSCAR/KPOINTS，不含 POTCAR）。
+        #[arg(long = "file", value_name = "NAME")]
+        file: Vec<String>,
+    },
+
     /// 执行一份已放行的构建计划（写入前自动备份覆盖项）。
     Apply {
         /// 计划 JSON 文件路径。

@@ -2,7 +2,7 @@ use vasp_domain::{BondMode, Hermes};
 use vasp_application::ports::Fs as FsPort;
 use vasp_infrastructure::{HermesCli, LocalFs};
 use vasp_application::{
-    ApplyPlan, CompareTasks, GetConvergence, GetForces, GetMagnetization, GetScf, GetStructureScene,
+    ApplyPlan, BuildInputs, BuildRequest, CompareTasks, GetConvergence, GetForces, GetMagnetization, GetScf, GetStructureScene,
     GetVibrations, Rollback, ScanProject,
 };
 
@@ -77,6 +77,70 @@ pub fn compare(tasks: &[String]) -> anyhow::Result<()> {
     let paths: Vec<std::path::PathBuf> = tasks.iter().map(std::path::PathBuf::from).collect();
     let report = CompareTasks::new(&fs).execute(&paths)?;
     emit(&serde_json::json!({ "ok": true, "data": report }))
+}
+
+pub fn build(
+    source: &str,
+    target: &str,
+    sets: &[String],
+    root_opt: Option<&str>,
+    files: &[String],
+) -> anyhow::Result<()> {
+    let fs = LocalFs::new();
+    let clock = SystemClock;
+
+    let src = std::path::PathBuf::from(source);
+    let (root, source_rel) = match root_opt {
+        Some(r) => (std::path::PathBuf::from(r), source.to_string()),
+        None => {
+            if src.is_absolute() {
+                let parent = src
+                    .parent()
+                    .ok_or_else(|| anyhow::anyhow!("源任务路径没有父目录"))?;
+                let name = src
+                    .file_name()
+                    .ok_or_else(|| anyhow::anyhow!("源任务路径没有目录名"))?
+                    .to_string_lossy()
+                    .to_string();
+                (parent.to_path_buf(), name)
+            } else {
+                (std::env::current_dir()?, source.to_string())
+            }
+        }
+    };
+
+    // target 必须是相对路径；给了绝对路径就试着剥掉 root 前缀
+    let target_rel = {
+        let t = std::path::Path::new(target);
+        if t.is_absolute() {
+            t.strip_prefix(&root)
+                .map_err(|_| anyhow::anyhow!("目标目录不在项目根内：{target}"))?
+                .to_string_lossy()
+                .to_string()
+        } else {
+            target.to_string()
+        }
+    };
+
+    let overrides = sets
+        .iter()
+        .map(|s| {
+            let (k, v) = s
+                .split_once('=')
+                .ok_or_else(|| anyhow::anyhow!("--set 需要 KEY=VALUE 形式：{s}"))?;
+            Ok((k.trim().to_string(), v.trim().to_string()))
+        })
+        .collect::<anyhow::Result<Vec<_>>>()?;
+
+    let req = BuildRequest {
+        root,
+        source_rel,
+        target_rel,
+        overrides,
+        files: files.to_vec(),
+    };
+    let plan = BuildInputs::new(&fs, &clock).execute(&req)?;
+    emit(&serde_json::json!({ "ok": true, "data": plan }))
 }
 
 pub fn apply(plan_path: &str) -> anyhow::Result<()> {

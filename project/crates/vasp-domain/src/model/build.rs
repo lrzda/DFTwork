@@ -22,6 +22,12 @@ pub struct BuildItem {
     pub action: WriteAction,
     /// 为什么这样写（例如「由 task-001/CONTCAR 生成，ENCUT 取 400」）。
     pub reason: String,
+    /// 覆盖前该文件的原有内容，供界面显示 diff。
+    ///
+    /// **不参与 plan_hash**：它只是「生成计划时的快照」，用于让人看懂改了什么；
+    /// 真正决定写什么的是 `content`。新建项为 `None`。
+    #[serde(default)]
+    pub previous_content: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

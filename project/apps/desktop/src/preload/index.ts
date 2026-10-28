@@ -17,6 +17,9 @@ const api: DftworkApi = {
   vibrations: (req) => ipcRenderer.invoke(IPC.vibrations, req),
   magnetization: (req) => ipcRenderer.invoke(IPC.magnetization, req),
   compare: (req) => ipcRenderer.invoke(IPC.compare, req),
+  build: (req) => ipcRenderer.invoke(IPC.build, req),
+  apply: (req) => ipcRenderer.invoke(IPC.apply, req),
+  rollback: (req) => ipcRenderer.invoke(IPC.rollback, req),
 };
 
 contextBridge.exposeInMainWorld("dftwork", api);

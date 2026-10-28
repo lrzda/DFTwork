@@ -1,4 +1,5 @@
 mod apply_plan;
+mod build_inputs;
 mod compare_tasks;
 mod get_convergence;
 mod rollback;
@@ -9,6 +10,7 @@ mod pending;
 mod scan_project;
 
 pub use apply_plan::*;
+pub use build_inputs::*;
 pub use compare_tasks::*;
 pub use get_convergence::*;
 pub use rollback::*;

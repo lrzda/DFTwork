@@ -203,6 +203,50 @@ export interface CompareReport {
   series: ConvergenceSeries[];
 }
 
+// ───────────────────────── 构建与放行 ─────────────────────────
+
+export type WriteAction = "create" | "overwrite" | "skip";
+
+export interface BuildItem {
+  rel_path: string;
+  /** 将写入的完整内容。 */
+  content: string;
+  action: WriteAction;
+  /** 为什么这样改，显示在 diff 面板上。 */
+  reason: string;
+  /** 覆盖前的原内容，仅用于显示 diff；新建项为 null。 */
+  previous_content: string | null;
+}
+
+export interface BuildPlan {
+  root: string;
+  items: BuildItem[];
+  plan_hash: string;
+  created_at: string;
+}
+
+export interface RestoreEntry {
+  rel_path: string;
+  /** 有的还原这个 blob；null 表示原本不存在，回滚时删除。 */
+  blob: string | null;
+}
+
+export interface BuildReceipt {
+  root: string;
+  plan_hash: string;
+  written: string[];
+  skipped: string[];
+  backup_dir: string | null;
+  restores: RestoreEntry[];
+  finished_at: string;
+}
+
+export interface RollbackReport {
+  restored: string[];
+  removed: string[];
+  finished_at: string;
+}
+
 export type Vec3 = [number, number, number];
 
 export interface Atom {
