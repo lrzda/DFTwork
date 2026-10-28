@@ -247,6 +247,34 @@ export interface RollbackReport {
   finished_at: string;
 }
 
+// ───────────────────────── AI 分析 ─────────────────────────
+
+export interface TokenUsage {
+  input: number;
+  output: number;
+  total: number;
+  cache_read: number;
+  cache_write: number;
+}
+
+export interface ToolCall {
+  name: string;
+  summary: string;
+  is_error: boolean;
+}
+
+export interface AnalysisReport {
+  session_id: string;
+  /** Hermes 自己报告的退出码。**不是进程退出码**。 */
+  exit_code: number;
+  text: string;
+  tokens: TokenUsage;
+  duration_ms: number;
+  event_lines: number;
+  tool_calls: ToolCall[];
+  timed_out: boolean;
+}
+
 export type Vec3 = [number, number, number];
 
 export interface Atom {

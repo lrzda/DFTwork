@@ -8,6 +8,7 @@ import {
   type ErrorPayload,
   type SceneRequest,
   type ScanRequest,
+  type AnalyzeRequest,
   type ApplyRequest,
   type BuildRequest,
   type CompareRequest,
@@ -92,6 +93,16 @@ export function registerIpc(): void {
     } finally {
       await fs.unlink(tmp).catch(() => undefined);
     }
+  });
+
+  // AI 分析可能要跑几十秒到几分钟：超时放宽到 5 分钟，
+  // 内核自己还有 --timeout 兜底（默认 180 秒）
+  ipcMain.handle(IPC.analyze, (_e, req: AnalyzeRequest) => {
+    const args = ["analyze", req.taskAbsPath];
+    if (req.model) args.push("--model", req.model);
+    if (req.provider) args.push("--provider", req.provider);
+    if (req.maxTurns) args.push("--max-turns", String(req.maxTurns));
+    return wrap(() => callCore(args, 300_000));
   });
 
   ipcMain.handle(IPC.rollback, async (_e, req: RollbackRequest) => {

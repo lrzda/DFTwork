@@ -1,4 +1,5 @@
 import type {
+  AnalysisReport,
   BuildPlan,
   BuildReceipt,
   CompareReport,
@@ -84,6 +85,13 @@ export const api = {
   apply: (plan: BuildPlan): Promise<BuildReceipt> => unwrap(bridge().apply({ plan })),
   rollback: (receipt: BuildReceipt): Promise<RollbackReport> =>
     unwrap(bridge().rollback({ receipt })),
+  analyze: (
+    taskAbsPath: string,
+    model?: string,
+    provider?: string,
+    maxTurns?: number,
+  ): Promise<AnalysisReport> =>
+    unwrap(bridge().analyze({ taskAbsPath, model, provider, maxTurns })),
 };
 
 /** 把任意异常转成一句人话，用于界面提示。 */

@@ -41,6 +41,7 @@ import type {
   VibrationReport,
 } from "@dftwork/shared";
 import { api, describeError } from "./api";
+import { AiPanel } from "./AiPanel";
 import { BuildPanel } from "./BuildPanel";
 import {
   ComparePanel,
@@ -63,7 +64,8 @@ type PanelKey =
   | "force"
   | "magnetization"
   | "compare"
-  | "build";
+  | "build"
+  | "ai";
 
 const STATUS_COLOR: Record<TaskStatusCode, string> = {
   TASK_COMPLETED: "green",
@@ -630,6 +632,18 @@ export default function App(): JSX.Element {
                 key: "compare",
                 label: "对比",
                 children: <ComparePanel data={compareData} />,
+              },
+              {
+                key: "ai",
+                label: "AI 分析",
+                children: (
+                  <AiPanel
+                    taskAbsPath={selected ? (absPathOf(selected) ?? null) : null}
+                    taskName={selected?.rel_path ?? null}
+                    hermesAvailable={hermes?.found ?? false}
+                    hermesReason={hermes?.reason ?? null}
+                  />
+                ),
               },
               {
                 key: "build",

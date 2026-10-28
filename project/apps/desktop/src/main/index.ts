@@ -1,8 +1,27 @@
 import { BrowserWindow, app, shell } from "electron";
-import { writeFileSync } from "node:fs";
+import { existsSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { registerIpc } from "./ipc";
 import { coreBinary } from "./core";
+
+/**
+ * 解析 hermes 可执行文件。
+ *
+ * 终端里 `hermes` 可用是因为 shell 配置加了 PATH，而 Electron 主进程继承的是
+ * 系统 PATH——两者不同，直接 spawn("hermes") 会 ENOENT。这里先试常见安装位置，
+ * 找不到再退回名字（由系统 PATH 决定）。
+ */
+function resolveHermes(): string {
+  const local = process.env.LOCALAPPDATA;
+  const candidates = [
+    local ? `${local}\\hermes\\hermes-agent\\.hermes\\bin\\hermes.exe` : "",
+    local ? `${local}\\hermes\\hermes-agent\\.hermes\\bin\\hermes.cmd` : "",
+  ].filter(Boolean);
+  for (const c of candidates) {
+    if (existsSync(c)) return c;
+  }
+  return "hermes";
+}
 
 function createWindow(): void {
   const win = new BrowserWindow({
@@ -86,6 +105,12 @@ function createWindow(): void {
 }
 
 app.whenReady().then(() => {
+  // 内核 spawn `hermes` 时继承这个变量。终端里能跑 `hermes` 是 shell 加了 PATH，
+  // Electron 继承的是系统 PATH——两者不同，不解析就 ENOENT。
+  if (!process.env.HERMES_BIN) {
+    process.env.HERMES_BIN = resolveHermes();
+    console.info(`[dftwork] HERMES_BIN = ${process.env.HERMES_BIN}`);
+  }
   // 启动时打一行内核路径，排查「找不到 exe」时第一时间能看见
   console.info(`[dftwork] core = ${coreBinary()}`);
   registerIpc();

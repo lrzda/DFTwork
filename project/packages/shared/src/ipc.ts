@@ -19,6 +19,7 @@ export const IPC = {
   build: "core:build",
   apply: "core:apply",
   rollback: "core:rollback",
+  analyze: "core:analyze",
 } as const;
 
 export type IpcChannel = (typeof IPC)[keyof typeof IPC];
@@ -41,6 +42,15 @@ export interface SceneRequest {
    * - `false`：只按真实坐标距离，孤立分子、团簇或想看「盒子里实际摆成什么样」时用
    */
   pbc?: boolean;
+}
+
+/** 让 AI 分析一个任务。 */
+export interface AnalyzeRequest {
+  taskAbsPath: string;
+  /** `--ignore-user-config` 下必须显式给模型。 */
+  model?: string;
+  provider?: string;
+  maxTurns?: number;
 }
 
 /** 以模板任务生成输入计划。 */
@@ -99,4 +109,5 @@ export interface DftworkApi {
   build(req: BuildRequest): Promise<Envelope<import("./dto").BuildPlan>>;
   apply(req: ApplyRequest): Promise<Envelope<import("./dto").BuildReceipt>>;
   rollback(req: RollbackRequest): Promise<Envelope<import("./dto").RollbackReport>>;
+  analyze(req: AnalyzeRequest): Promise<Envelope<import("./dto").AnalysisReport>>;
 }

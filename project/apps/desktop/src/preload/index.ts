@@ -20,6 +20,7 @@ const api: DftworkApi = {
   build: (req) => ipcRenderer.invoke(IPC.build, req),
   apply: (req) => ipcRenderer.invoke(IPC.apply, req),
   rollback: (req) => ipcRenderer.invoke(IPC.rollback, req),
+  analyze: (req) => ipcRenderer.invoke(IPC.analyze, req),
 };
 
 contextBridge.exposeInMainWorld("dftwork", api);
