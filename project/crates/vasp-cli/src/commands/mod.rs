@@ -1,8 +1,9 @@
 use vasp_domain::{BondMode, Hermes};
+use vasp_application::ports::Fs as FsPort;
 use vasp_infrastructure::{HermesCli, LocalFs};
 use vasp_application::{
-    CompareTasks, GetConvergence, GetForces, GetMagnetization, GetScf, GetStructureScene,
-    GetVibrations, ScanProject,
+    ApplyPlan, CompareTasks, GetConvergence, GetForces, GetMagnetization, GetScf, GetStructureScene,
+    GetVibrations, Rollback, ScanProject,
 };
 
 use crate::support::SystemClock;
@@ -75,6 +76,31 @@ pub fn compare(tasks: &[String]) -> anyhow::Result<()> {
     let fs = LocalFs::new();
     let paths: Vec<std::path::PathBuf> = tasks.iter().map(std::path::PathBuf::from).collect();
     let report = CompareTasks::new(&fs).execute(&paths)?;
+    emit(&serde_json::json!({ "ok": true, "data": report }))
+}
+
+pub fn apply(plan_path: &str) -> anyhow::Result<()> {
+    let fs = LocalFs::new();
+    let clock = SystemClock;
+    let text = fs.read_text(
+        std::path::Path::new(plan_path),
+        vasp_application::ports::MAX_FULL_READ,
+    )?;
+    let plan: vasp_domain::BuildPlan = serde_json::from_str(&text)?;
+    let receipt = ApplyPlan::new(&fs, &clock).execute(&plan)?;
+    emit(&serde_json::json!({ "ok": true, "data": receipt }))
+}
+
+pub fn rollback(receipt_path: &str) -> anyhow::Result<()> {
+    let fs = LocalFs::new();
+    let clock = SystemClock;
+    let text = fs.read_text(
+        std::path::Path::new(receipt_path),
+        vasp_application::ports::MAX_FULL_READ,
+    )?;
+    let receipt: vasp_domain::BuildReceipt = serde_json::from_str(&text)?;
+    let root = std::path::PathBuf::from(&receipt.root);
+    let report = Rollback::new(&fs, &clock).execute(&receipt, &root)?;
     emit(&serde_json::json!({ "ok": true, "data": report }))
 }
 

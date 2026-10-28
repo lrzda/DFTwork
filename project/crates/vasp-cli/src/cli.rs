@@ -70,6 +70,18 @@ pub enum Commands {
         tasks: Vec<String>,
     },
 
+    /// 执行一份已放行的构建计划（写入前自动备份覆盖项）。
+    Apply {
+        /// 计划 JSON 文件路径。
+        plan: String,
+    },
+
+    /// 从回执回滚一次写入。
+    Rollback {
+        /// 回执 JSON 文件路径。
+        receipt: String,
+    },
+
     /// 探测 Hermes 是否可用（缺席是正常状态）。
     HermesProbe,
 

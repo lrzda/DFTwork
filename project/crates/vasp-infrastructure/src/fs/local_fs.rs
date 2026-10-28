@@ -116,6 +116,24 @@ impl Fs for LocalFs {
     fn is_dir(&self, path: &Path) -> bool {
         path.is_dir()
     }
+
+    fn write_text(&self, path: &Path, content: &str) -> AppResult<()> {
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent)
+                .map_err(|e| AppError::io(parent.display().to_string(), e))?;
+        }
+        std::fs::write(path, content.as_bytes())
+            .map_err(|e| AppError::io(path.display().to_string(), e))
+    }
+
+    fn remove_file(&self, path: &Path) -> AppResult<()> {
+        match std::fs::remove_file(path) {
+            Ok(()) => Ok(()),
+            // 本来就不存在 → 回滚视为成功（要幂等）
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+            Err(e) => Err(AppError::io(path.display().to_string(), e)),
+        }
+    }
 }
 
 /// 解码文本：UTF-8 优先；失败时按 GBK 尝试——Windows 上从中文环境导出的

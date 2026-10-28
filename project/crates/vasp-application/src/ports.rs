@@ -47,6 +47,17 @@ pub trait Fs: Send + Sync {
     /// 调用方经常要处理「给文件也行、给目录也行」的入参（例如 `scene` 命令），
     /// 缺了它就只能靠 `list_dir` 是否报错来猜，那是拿异常当控制流。
     fn is_dir(&self, path: &Path) -> bool;
+
+    /// 写文件，父目录不存在时自动创建。
+    ///
+    /// **只有 `ApplyPlan` 该调用它**——其他任何用例都不得写盘。
+    /// 这个约束靠代码审查守，接口上没法强制（Rust 没有 effect 系统）。
+    fn write_text(&self, path: &Path, content: &str) -> Result<(), AppError>;
+
+    /// 删除文件。回滚时清理「本次计划新建的文件」。
+    ///
+    /// 文件本来就不存在时视为成功：回滚要幂等，重复执行不该报错。
+    fn remove_file(&self, path: &Path) -> Result<(), AppError>;
 }
 
 /// 单个文件读取上限：64 MB。超过时调用方应改用 [`Fs::read_tail`]。

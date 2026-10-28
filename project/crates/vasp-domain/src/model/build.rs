@@ -49,13 +49,28 @@ impl BuildPlan {
     }
 }
 
+/// 回滚一项：把某个文件恢复成计划执行前的样子。
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct RestoreEntry {
+    /// 相对项目根的路径。
+    pub rel_path: String,
+    /// 原内容在备份里的 blob 名。
+    ///
+    /// `None` 表示这个文件原本不存在（计划里的 `Create`），回滚时应删除。
+    pub blob: Option<String>,
+}
+
 /// 一次落盘的回执。
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct BuildReceipt {
+    /// 项目根，回滚时据此定位文件。存进回执是为了让回滚不依赖任何全局状态。
+    pub root: String,
     pub plan_hash: String,
     pub written: Vec<String>,
     pub skipped: Vec<String>,
     /// 备份目录，相对项目根；没有覆盖项时为 `None`。
     pub backup_dir: Option<String>,
+    /// 回滚所需信息，与 `written` 一一对应。
+    pub restores: Vec<RestoreEntry>,
     pub finished_at: String,
 }
