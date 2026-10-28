@@ -44,7 +44,12 @@ export function StructureViewport({
   const hostRef = useRef<HTMLDivElement | null>(null);
   const rendererRef = useRef<ThreeRenderer | null>(null);
   const [ready, setReady] = useState(false);
-  const [options, setOptions] = useState<RenderOptions>({ ...DEFAULT_OPTIONS });
+  // 冒烟验证用：?bonds=0 关闭成键显示（默认开启）。
+  // 和 ?wrap=1 一样，只是给无人值守截图用的入口，不影响正常使用。
+  const [options, setOptions] = useState<RenderOptions>(() => ({
+    ...DEFAULT_OPTIONS,
+    showBonds: new URLSearchParams(window.location.search).get("bonds") !== "0",
+  }));
 
   // 渲染选项里的 wrapPbc 跟随父组件的 PBC 状态：
   // 内核已经按同一模式算好成键，显示与判定必须一致，否则会出现
@@ -172,12 +177,43 @@ export function StructureViewport({
                 onChange={(v) => setOptions((o) => ({ ...o, atomScale: v }))}
               />
             </Tooltip>
+            {/* 「键」与「晶胞」是纯显示开关，只影响渲染，不重新请求内核。
+                成键的**判据**由 PBC 开关决定（内核算好递过来），这里只管画不画。 */}
+            <Tooltip title="显示化学键（判据：共价半径和 ×1.2，跟随 PBC 开关）">
+              <Space size={4} style={{ cursor: "help" }}>
+                <Text
+                  style={{
+                    fontSize: 12,
+                    color: options.showBonds ? "#69b1ff" : "#8b9bb4",
+                    userSelect: "none",
+                  }}
+                >
+                  键
+                </Text>
+                <Switch
+                  size="small"
+                  checked={options.showBonds}
+                  onChange={(v) => setOptions((o) => ({ ...o, showBonds: v }))}
+                />
+              </Space>
+            </Tooltip>
             <Tooltip title="显示晶胞棱">
-              <Switch
-                size="small"
-                checked={options.showCell}
-                onChange={(v) => setOptions((o) => ({ ...o, showCell: v }))}
-              />
+              <Space size={4} style={{ cursor: "help" }}>
+                <Text
+                  style={{
+                    fontSize: 12,
+                    color: options.showCell ? "#69b1ff" : "#8b9bb4",
+                    userSelect: "none",
+                  }}
+                >
+                  晶胞
+                </Text>
+                <Switch
+                  size="small"
+                  checked={options.showCell}
+                  onChange={(v) => setOptions((o) => ({ ...o, showCell: v }))}
+                />
+              </Space>
             </Tooltip>
             <Button size="small" onClick={() => rendererRef.current?.resetView()}>
               复位
