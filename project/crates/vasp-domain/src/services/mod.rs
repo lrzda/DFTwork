@@ -11,6 +11,7 @@ mod magnetization;
 mod scf;
 mod structure;
 mod stubs;
+mod trajectory;
 mod vibrations;
 
 pub use classify::*;
@@ -25,4 +26,5 @@ pub use magnetization::*;
 pub use scf::*;
 pub use structure::*;
 pub use stubs::*;
+pub use trajectory::*;
 pub use vibrations::*;

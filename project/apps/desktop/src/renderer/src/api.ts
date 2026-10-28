@@ -1,5 +1,6 @@
 import type {
   AnalysisReport,
+  TrajectoryReport,
   BuildPlan,
   BuildReceipt,
   CompareReport,
@@ -92,6 +93,8 @@ export const api = {
     maxTurns?: number,
   ): Promise<AnalysisReport> =>
     unwrap(bridge().analyze({ taskAbsPath, model, provider, maxTurns })),
+  trajectory: (taskAbsPath: string): Promise<TrajectoryReport> =>
+    unwrap(bridge().trajectory({ taskAbsPath })),
 };
 
 /** 把任意异常转成一句人话，用于界面提示。 */

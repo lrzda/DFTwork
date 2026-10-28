@@ -52,6 +52,7 @@ import {
 } from "./PropertyPanels";
 import { StatsPanel } from "./StatsPanel";
 import { StructureViewport } from "./viewer/StructureViewport";
+import { TrajectoryPlayer } from "./TrajectoryPlayer";
 
 const { Title, Text, Paragraph } = Typography;
 
@@ -91,6 +92,11 @@ export default function App(): JSX.Element {
    * PBC 模式。同时决定两件事：原子是否折回原胞、成键是否按最小镜像算。
    * 切换它必须重新向内核要一次场景——成键是内核算的，前端不重复实现判据。
    */
+  // 结构视图的子标签（static / trajectory）。冒烟用 ?sub=trajectory 直开播放器。
+  const [subTab, setSubTab] = useState<string>(
+    () => new URLSearchParams(window.location.search).get("sub") ?? "static",
+  );
+
   const [pbc, setPbc] = useState(
     // 默认开启；`?wrap=0` 可指定关闭（截图对比与分享链接用）
     () => new URLSearchParams(window.location.search).get("wrap") !== "0",
@@ -568,13 +574,44 @@ export default function App(): JSX.Element {
                 key: "structure",
                 label: "结构",
                 children: (
-                  <StructureViewport
-                    scene={scene}
-                    loading={sceneLoading}
-                    sourceName={scene?.source_file ?? null}
-                    error={sceneError}
-                    pbc={pbc}
-                    onPbcChange={handlePbcChange}
+                  // 结构视图内部再分两个子标签：
+                  // 「结构」看一帧（含成键、晶胞、PBC），「轨迹」连续播放 XDATCAR。
+                  // 播放时不算键——逐帧按最小镜像判成键跟不上 20 fps，而且
+                  // MD 的成键本来就该看统计而不是单帧。
+                  <Tabs
+                    className="sub-tabs"
+                    size="small"
+                    defaultActiveKey="static"
+                    activeKey={subTab}
+                    onChange={(k) => setSubTab(k)}
+                    items={[
+                      {
+                        key: "static",
+                        label: "结构",
+                        children: (
+                          <StructureViewport
+                            scene={scene}
+                            loading={sceneLoading}
+                            sourceName={scene?.source_file ?? null}
+                            error={sceneError}
+                            pbc={pbc}
+                            onPbcChange={handlePbcChange}
+                          />
+                        ),
+                      },
+                      {
+                        key: "trajectory",
+                        label: "轨迹",
+                        children: (
+                          <TrajectoryPlayer
+                            taskAbsPath={selected ? (absPathOf(selected) ?? null) : null}
+                            taskName={selected?.rel_path ?? null}
+                            pbc={pbc}
+                            onPbcChange={handlePbcChange}
+                          />
+                        ),
+                      },
+                    ]}
                   />
                 ),
               },

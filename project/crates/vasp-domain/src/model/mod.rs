@@ -9,6 +9,7 @@ pub mod scf;
 pub mod status;
 pub mod structure;
 pub mod task;
+pub mod trajectory;
 pub mod vibration;
 
 pub use analysis::*;
@@ -22,4 +23,5 @@ pub use scf::*;
 pub use status::*;
 pub use structure::*;
 pub use task::*;
+pub use trajectory::*;
 pub use vibration::*;

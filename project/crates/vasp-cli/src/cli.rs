@@ -63,6 +63,12 @@ pub enum Commands {
         task: String,
     },
 
+    /// 读取 XDATCAR，输出可播放的结构轨迹。
+    Trajectory {
+        /// 任务目录。
+        task: String,
+    },
+
     /// 对比多个任务：INCAR 差异 + 收敛曲线。
     Compare {
         /// 至少两个任务目录。

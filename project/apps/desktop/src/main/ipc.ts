@@ -9,6 +9,7 @@ import {
   type SceneRequest,
   type ScanRequest,
   type AnalyzeRequest,
+  type TrajectoryRequest,
   type ApplyRequest,
   type BuildRequest,
   type CompareRequest,
@@ -104,6 +105,12 @@ export function registerIpc(): void {
     if (req.maxTurns) args.push("--max-turns", String(req.maxTurns));
     return wrap(() => callCore(args, 300_000));
   });
+
+  // 轨迹数据可能 1 MB 上下（261 帧 × 73 原子），读 XDATCAR 本身很快，
+  // 放宽到 60 秒只是防超大 MD 文件
+  ipcMain.handle(IPC.trajectory, (_e, req: TrajectoryRequest) =>
+    wrap(() => callCore(["trajectory", req.taskAbsPath], 60_000)),
+  );
 
   ipcMain.handle(IPC.rollback, async (_e, req: RollbackRequest) => {
     const tmp = path.join(app.getPath("temp"), `dftwork-receipt-${Date.now()}.json`);

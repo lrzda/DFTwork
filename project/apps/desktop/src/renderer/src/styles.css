@@ -85,3 +85,44 @@ body {
     grid-template-columns: minmax(0, 1fr);
   }
 }
+
+
+/* 结构视图的子标签：「结构」/「轨迹」。
+   和右侧主标签页一样，每一层都要 flex:1 + min-height:0，
+   断了任何一层，3D canvas 就会塌成 0 高（白屏）。 */
+.sub-tabs {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+.sub-tabs > .ant-tabs-nav {
+  margin: 0 0 6px 0;
+}
+.sub-tabs > .ant-tabs-content-holder {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+/* 每一层都必须是 flex 容器，光给 flex:1 不够：
+   .ant-tabs-content 默认 display:block，里面的 flex:1 会被忽略，
+   tabpane 高度就退化成内容高度（3D 容器 flex:1 在无高度父级里 = 0）。 */
+.sub-tabs .ant-tabs-content {
+  flex: 1;
+  min-height: 0;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+.sub-tabs .ant-tabs-tabpane {
+  flex: 1;
+  min-height: 0;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+/* tabpane 未激活时 antd 会 display:none，这里只在激活时要求撑满 */
+.sub-tabs .ant-tabs-tabpane:not(.ant-tabs-tabpane-active) {
+  display: none;
+}

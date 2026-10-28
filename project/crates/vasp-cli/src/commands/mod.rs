@@ -2,6 +2,7 @@ use vasp_domain::{BondMode, Hermes};
 use vasp_application::ports::Fs as FsPort;
 use vasp_infrastructure::{HermesCli, HermesRunner, LocalFs};
 use vasp_application::{
+    GetTrajectory,
     AnalyzeTask, ApplyPlan, BuildInputs, BuildRequest, CompareTasks, GetConvergence, GetForces, GetMagnetization, GetScf, GetStructureScene,
     GetVibrations, Rollback, ScanProject,
 };
@@ -69,6 +70,12 @@ pub fn forces(task: &str) -> anyhow::Result<()> {
 pub fn vibrations(task: &str) -> anyhow::Result<()> {
     let fs = LocalFs::new();
     let report = GetVibrations::new(&fs).execute(Path::new(task))?;
+    emit(&serde_json::json!({ "ok": true, "data": report }))
+}
+
+pub fn trajectory(task: &str) -> anyhow::Result<()> {
+    let fs = LocalFs::new();
+    let report = GetTrajectory::new(&fs).execute(Path::new(task))?;
     emit(&serde_json::json!({ "ok": true, "data": report }))
 }
 

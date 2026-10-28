@@ -20,6 +20,7 @@ export const IPC = {
   apply: "core:apply",
   rollback: "core:rollback",
   analyze: "core:analyze",
+  trajectory: "core:trajectory",
 } as const;
 
 export type IpcChannel = (typeof IPC)[keyof typeof IPC];
@@ -42,6 +43,11 @@ export interface SceneRequest {
    * - `false`：只按真实坐标距离，孤立分子、团簇或想看「盒子里实际摆成什么样」时用
    */
   pbc?: boolean;
+}
+
+/** 读一个任务的 XDATCAR。 */
+export interface TrajectoryRequest {
+  taskAbsPath: string;
 }
 
 /** 让 AI 分析一个任务。 */
@@ -110,4 +116,5 @@ export interface DftworkApi {
   apply(req: ApplyRequest): Promise<Envelope<import("./dto").BuildReceipt>>;
   rollback(req: RollbackRequest): Promise<Envelope<import("./dto").RollbackReport>>;
   analyze(req: AnalyzeRequest): Promise<Envelope<import("./dto").AnalysisReport>>;
+  trajectory(req: TrajectoryRequest): Promise<Envelope<import("./dto").TrajectoryReport>>;
 }

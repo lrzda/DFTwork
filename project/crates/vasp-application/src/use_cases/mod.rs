@@ -7,6 +7,7 @@ mod rollback;
 mod get_magnetization;
 mod get_properties;
 mod get_structure_scene;
+mod get_trajectory;
 mod pending;
 mod scan_project;
 
@@ -19,5 +20,6 @@ pub use rollback::*;
 pub use get_magnetization::*;
 pub use get_properties::*;
 pub use get_structure_scene::*;
+pub use get_trajectory::*;
 pub use pending::*;
 pub use scan_project::*;

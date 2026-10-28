@@ -42,6 +42,10 @@ export class ThreeRenderer implements SceneRenderer {
   private data: StructureScene | null = null;
   private effects: RenderEffect[] = [];
   private clock = new THREE.Clock();
+  /** 原子球列表，顺序与 `data.atoms` 一致。轨迹播放只改这些 mesh 的位置。 */
+  private atomMeshes: THREE.Mesh[] = [];
+  /** setScene 时算出的几何中心，updatePositions 要用它做同样的平移。 */
+  private sceneCenter = new THREE.Vector3();
   private observer: ResizeObserver | null = null;
   private home = { pos: new THREE.Vector3(0, 0, 30), target: new THREE.Vector3(0, 0, 0) };
 
@@ -109,6 +113,7 @@ export class ThreeRenderer implements SceneRenderer {
 
     this.data = data;
     this.clearSafely(root);
+    this.atomMeshes = [];
     this.applyBackground();
 
     if (data.atoms.length === 0) {
@@ -137,6 +142,7 @@ export class ThreeRenderer implements SceneRenderer {
     const center = box.getCenter(new THREE.Vector3());
     const size = box.getSize(new THREE.Vector3());
     const maxDim = Math.max(size.x, size.y, size.z) || 1;
+    this.sceneCenter.copy(center);
 
     // ── 2. 原子球：同元素共用材质，几何体全场共用一个单位球
     const sphere = new THREE.SphereGeometry(1, 28, 20);
@@ -160,6 +166,7 @@ export class ThreeRenderer implements SceneRenderer {
       const p = new THREE.Vector3(effective[i][0], effective[i][1], effective[i][2]).sub(center);
       mesh.position.copy(p);
       atomPositions.push(p);
+      this.atomMeshes.push(mesh);
       root.add(mesh);
     }
 
@@ -205,6 +212,29 @@ export class ThreeRenderer implements SceneRenderer {
     // ── 6. 自定义效果挂载点
     const ctx: EffectContext = { root, scene: data, options: this.options };
     for (const e of this.effects) e.apply(ctx);
+  }
+
+  /**
+   * 只更新原子位置，不重建场景——轨迹播放靠这个。
+   *
+   * 为什么不能每帧 setScene：一帧要重建 N 个球、共享几何体、材质表，
+   * 还要重算包围盒和相机。90 原子 × 20 fps 会直接卡死。这里只改
+   * `mesh.position`，GPU 侧几乎零成本，渲染循环下一帧自动反映。
+   *
+   * **键不重算**：MD 里成键关系每帧都在变，按距离阈值逐帧重算既慢又不准。
+   * 播放时沿用首帧的键（不想要就用「键」开关关掉）。
+   * 坐标系与 `setScene` 保持一致：先按 wrapPbc 决定是否折回，再减去中心。
+   */
+  updatePositions(positions: Vec3[]): void {
+    const data = this.data;
+    if (!data || this.atomMeshes.length === 0) return;
+    const wrap = this.options.wrapPbc;
+    const c = this.sceneCenter;
+    const n = Math.min(this.atomMeshes.length, positions.length);
+    for (let i = 0; i < n; i++) {
+      const p = wrap ? wrapToCell(positions[i], data.cell) : positions[i];
+      this.atomMeshes[i].position.set(p[0] - c.x, p[1] - c.y, p[2] - c.z);
+    }
   }
 
   setOptions(partial: Partial<RenderOptions>): void {

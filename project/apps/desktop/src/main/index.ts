@@ -77,6 +77,10 @@ function createWindow(): void {
     if (process.env.DFTWORK_SMOKE_BONDS) query.bonds = process.env.DFTWORK_SMOKE_BONDS;
     if (process.env.DFTWORK_SMOKE_TAB) query.tab = process.env.DFTWORK_SMOKE_TAB;
     if (process.env.DFTWORK_SMOKE_PANEL) query.panel = process.env.DFTWORK_SMOKE_PANEL;
+    // 结构视图的子标签：static / trajectory
+    if (process.env.DFTWORK_SMOKE_SUB) query.sub = process.env.DFTWORK_SMOKE_SUB;
+    // 轨迹播放器定位到第几帧
+    if (process.env.DFTWORK_SMOKE_FRAME) query.frame = process.env.DFTWORK_SMOKE_FRAME;
     // 冒烟时指定要选中的任务（默认自动选第一个已完成的任务）
     if (process.env.DFTWORK_SMOKE_TASK) query.task = process.env.DFTWORK_SMOKE_TASK;
     if (process.env.DFTWORK_SMOKE_COMPARE) query.compare = process.env.DFTWORK_SMOKE_COMPARE;

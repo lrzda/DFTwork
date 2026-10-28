@@ -17,6 +17,7 @@ fn main() {
         Commands::Scf { task } => commands::scf(&task),
         Commands::Forces { task } => commands::forces(&task),
         Commands::Vibrations { task } => commands::vibrations(&task),
+        Commands::Trajectory { task } => commands::trajectory(&task),
         Commands::Compare { tasks } => commands::compare(&tasks),
         Commands::Build { source, target, set, root, file } => {
             commands::build(&source, &target, &set, root.as_deref(), &file)

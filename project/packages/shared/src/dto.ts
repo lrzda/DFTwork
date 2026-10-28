@@ -263,6 +263,29 @@ export interface ToolCall {
   is_error: boolean;
 }
 
+// ───────────────────────── 结构轨迹 ─────────────────────────
+
+export interface TrajectoryFrame {
+  /** 文件里的帧号，从 1 开始。 */
+  index: number;
+  /** 笛卡尔坐标（Å），与 `elements` 展开后的顺序一致。 */
+  positions: Vec3[];
+}
+
+export interface TrajectoryReport {
+  source_file: string;
+  comment: string;
+  elements: string[];
+  counts: number[];
+  /** 晶格矢量（Å）。整条轨迹共用一套（变胞 MD 暂不支持）。 */
+  cell: number[][];
+  frames: TrajectoryFrame[];
+  /** 降采样前的真实帧数。 */
+  total_frames: number;
+  sampled: boolean;
+  note: string;
+}
+
 export interface AnalysisReport {
   session_id: string;
   /** Hermes 自己报告的退出码。**不是进程退出码**。 */
