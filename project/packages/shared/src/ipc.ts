@@ -11,6 +11,10 @@ export const IPC = {
   scan: "core:scan",
   convergence: "core:convergence",
   scene: "core:scene",
+  scf: "core:scf",
+  forces: "core:forces",
+  vibrations: "core:vibrations",
+  magnetization: "core:magnetization",
 } as const;
 
 export type IpcChannel = (typeof IPC)[keyof typeof IPC];
@@ -35,6 +39,17 @@ export interface SceneRequest {
   pbc?: boolean;
 }
 
+/** 四项属性查询共用同一个入参形状：给任务目录或文件都行。 */
+export interface TaskRequest {
+  taskAbsPath: string;
+}
+
+/** `forces` 一次返回两样东西：每原子力和晶胞应力。 */
+export interface ForcesResponse {
+  forces: import("./dto").ForceReport;
+  stress: import("./dto").StressReport;
+}
+
 /** 跨进程边界不抛异常，只回信封——Electron 会把异常变成没有 code 的字符串。 */
 export type Envelope<T> =
   | { ok: true; data: T }
@@ -47,4 +62,8 @@ export interface DftworkApi {
   scan(req: ScanRequest): Promise<Envelope<import("./dto").ScanReport>>;
   convergence(req: ConvergenceRequest): Promise<Envelope<import("./dto").ConvergenceSeries>>;
   scene(req: SceneRequest): Promise<Envelope<import("./dto").StructureScene>>;
+  scf(req: TaskRequest): Promise<Envelope<import("./dto").ScfSeries>>;
+  forces(req: TaskRequest): Promise<Envelope<ForcesResponse>>;
+  vibrations(req: TaskRequest): Promise<Envelope<import("./dto").VibrationReport>>;
+  magnetization(req: TaskRequest): Promise<Envelope<import("./dto").MagnetizationReport>>;
 }

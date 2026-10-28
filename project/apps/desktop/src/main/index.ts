@@ -55,6 +55,9 @@ function createWindow(): void {
     // 冒烟时可指定初始渲染状态，用于截「PBC 关 / 开」这类对比图
     if (process.env.DFTWORK_SMOKE_WRAP) query.wrap = process.env.DFTWORK_SMOKE_WRAP;
     if (process.env.DFTWORK_SMOKE_TAB) query.tab = process.env.DFTWORK_SMOKE_TAB;
+    if (process.env.DFTWORK_SMOKE_PANEL) query.panel = process.env.DFTWORK_SMOKE_PANEL;
+    // 冒烟时指定要选中的任务（默认自动选第一个已完成的任务）
+    if (process.env.DFTWORK_SMOKE_TASK) query.task = process.env.DFTWORK_SMOKE_TASK;
     void win.loadFile(
       path.join(__dirname, "../renderer/index.html"),
       Object.keys(query).length > 0 ? { query } : undefined,

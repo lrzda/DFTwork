@@ -3,10 +3,14 @@ import type {
   DftworkApi,
   Envelope,
   ErrorPayload,
+  ForcesResponse,
   HermesCapability,
+  MagnetizationReport,
   ScanReport,
+  ScfSeries,
   StructureScene,
   VersionInfo,
+  VibrationReport,
 } from "@dftwork/shared";
 
 declare global {
@@ -58,6 +62,13 @@ export const api = {
     unwrap(bridge().convergence({ taskAbsPath })),
   scene: (fileAbsPath: string, pbc = true): Promise<StructureScene> =>
     unwrap(bridge().scene({ fileAbsPath, pbc })),
+  scf: (taskAbsPath: string): Promise<ScfSeries> => unwrap(bridge().scf({ taskAbsPath })),
+  forces: (taskAbsPath: string): Promise<ForcesResponse> =>
+    unwrap(bridge().forces({ taskAbsPath })),
+  vibrations: (taskAbsPath: string): Promise<VibrationReport> =>
+    unwrap(bridge().vibrations({ taskAbsPath })),
+  magnetization: (taskAbsPath: string): Promise<MagnetizationReport> =>
+    unwrap(bridge().magnetization({ taskAbsPath })),
 };
 
 /** 把任意异常转成一句人话，用于界面提示。 */

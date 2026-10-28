@@ -47,42 +47,37 @@ body {
   overflow: auto;
 }
 
-/* 右列：结构在上、收敛在下。两栏都用 flex 分配高度，
-   Card 的 body 必须是 flex 容器，内部内容才能撑满（图表、画布都靠这个）。 */
-.right-col {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  min-height: 0;
-}
-
-.right-col .ant-card {
+/* 右列：改成多标签页（结构 / 收敛 / SCF / 振动 / 力 / 磁矩）。
+   整条链条都要 flex，否则 3D 画布和图表拿不到高度——canvas 高度为 0 会直接白屏。 */
+.right-pane {
   display: flex;
   flex-direction: column;
   min-height: 0;
 }
 
-.right-col .ant-card-body {
+.right-pane .ant-card-body {
   flex: 1;
   min-height: 0;
   display: flex;
   flex-direction: column;
 }
 
-.pane-structure {
-  flex: 1.7;
-  min-height: 280px;
-}
-
-.pane-convergence {
+.right-pane .ant-tabs {
   flex: 1;
-  min-height: 180px;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
 }
 
-@media (max-height: 720px) {
-  .pane-structure {
-    min-height: 220px;
-  }
+.right-pane .ant-tabs-content-holder {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
+
+.right-pane .ant-tabs-content,
+.right-pane .ant-tabs-tabpane {
+  height: 100%;
 }
 
 @media (max-width: 1100px) {

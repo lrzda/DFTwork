@@ -6,6 +6,7 @@ import {
   type ErrorPayload,
   type SceneRequest,
   type ScanRequest,
+  type TaskRequest,
 } from "@dftwork/shared";
 import { callCore } from "./core";
 
@@ -51,4 +52,18 @@ export function registerIpc(): void {
     if (req.pbc === false) args.push("--no-pbc");
     return wrap(() => callCore(args));
   });
+
+  // 四项属性查询。OUTCAR 大的时候（几百 MB）要等十几秒，所以放宽超时。
+  ipcMain.handle(IPC.scf, (_e, req: TaskRequest) =>
+    wrap(() => callCore(["scf", req.taskAbsPath])),
+  );
+  ipcMain.handle(IPC.forces, (_e, req: TaskRequest) =>
+    wrap(() => callCore(["forces", req.taskAbsPath], 180_000)),
+  );
+  ipcMain.handle(IPC.vibrations, (_e, req: TaskRequest) =>
+    wrap(() => callCore(["vibrations", req.taskAbsPath], 180_000)),
+  );
+  ipcMain.handle(IPC.magnetization, (_e, req: TaskRequest) =>
+    wrap(() => callCore(["magnetization", req.taskAbsPath], 180_000)),
+  );
 }

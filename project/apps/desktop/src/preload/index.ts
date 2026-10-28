@@ -12,6 +12,10 @@ const api: DftworkApi = {
   scan: (req) => ipcRenderer.invoke(IPC.scan, req),
   convergence: (req) => ipcRenderer.invoke(IPC.convergence, req),
   scene: (req) => ipcRenderer.invoke(IPC.scene, req),
+  scf: (req) => ipcRenderer.invoke(IPC.scf, req),
+  forces: (req) => ipcRenderer.invoke(IPC.forces, req),
+  vibrations: (req) => ipcRenderer.invoke(IPC.vibrations, req),
+  magnetization: (req) => ipcRenderer.invoke(IPC.magnetization, req),
 };
 
 contextBridge.exposeInMainWorld("dftwork", api);
