@@ -106,3 +106,42 @@ node_modules/.pnpm/electron@*/node_modules/electron/dist/electron.exe \
 ## 许可
 
 MIT。`reference/` 与原前端组件来自 [VASPFlow](https://github.com/21271122/VASPFlow)（MIT），保留其版权声明。
+
+## 打包成安装包
+
+```bash
+# 1. release 版内核（必须！debug 版 40+ MB，release 只有 2.9 MB）
+cargo build --release -p vasp-cli
+
+# 2. 出包
+export ELECTRON_BUILDER_BINARIES_MIRROR="https://npmmirror.com/mirrors/electron-builder-binaries/"
+pnpm --filter @dftwork/desktop package
+```
+
+产物在 `apps/desktop/dist/`：
+
+| 文件 | 说明 |
+|---|---|
+| `DFTwork-0.1.0-x64.exe` | NSIS 安装包（可选安装目录、建桌面快捷方式、卸载保留用户数据） |
+| `DFTwork-0.1.0-portable.exe` | 免安装版，双击即用 |
+
+### 打包时的三个要点
+
+1. **内核走 `extraResources`，不进 asar**。asar 是虚拟文件系统，里面的 exe
+   没法被 `spawn`。配置在 `apps/desktop/electron-builder.yml` 的
+   `extraResources: target/release/vaspcore.exe → bin/vaspcore.exe`，
+   对应 `src/main/core.ts` 里 `app.isPackaged` 分支的路径。
+
+2. **`HERMES_BIN` 必须由主进程解析**。终端里 `hermes` 能用是因为 shell 配置加了
+   PATH，而 Electron 继承的是系统 PATH——直接 `spawn("hermes")` 会 ENOENT。
+   打包后的机器上同样如此，所以 `main/index.ts` 启动时解析一次绝对路径。
+
+3. **图标在 `apps/desktop/build/icon.ico`**（多尺寸 16–256）。没有它会用
+   Electron 默认图标，装出来像是别人的项目。
+
+### 当前未做
+
+- **代码签名**：安装时 Windows SmartScreen 会提示「未知发布者」。个人使用可忽略；
+  要给别人用得买证书（约 $100–300/年）。
+- **自动更新**：首版手动下载新版本。
+- **macOS / Linux 包**：代码跨平台，但只验证过 Windows。

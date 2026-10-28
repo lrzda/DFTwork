@@ -1,0 +1,55 @@
+appId: com.lrzda.dftwork
+productName: DFTwork
+copyright: Copyright © 2026 lrzda
+
+directories:
+  output: dist
+  buildResources: build
+
+# 用 pnpm 装好的 Electron 二进制，不走网络下载。
+# 默认行为会去打镜像下 electron-v33.4.11-win32-x64.zip，而 pnpm 的
+# node_modules 是符号链接结构，electron-builder 找不到就直接联网了；
+# 国内网络下这条路会 404。指到实际 dist 目录最稳。
+electronDist: ../../node_modules/.pnpm/electron@33.4.11_supports-color@7.2.0/node_modules/electron/dist
+
+# 只打构建产物 + package.json。
+# 源码不打进去：out/ 已经是 bundle 后的结果，带源码只会让体积翻倍。
+files:
+  - out/**/*
+  - package.json
+  - "!**/*.map"
+
+# 内核单独放 resources/bin/——core.ts 在打包态就是按这个路径找的。
+# 用 extraResources 而不是 asar 内部：exe 必须能被 spawn，
+# asar 里的文件是虚拟的，进程起不来。
+extraResources:
+  - from: ../../target/release/vaspcore.exe
+    to: bin/vaspcore.exe
+
+win:
+  target:
+    - target: nsis
+      arch: [x64]
+    - target: portable
+      arch: [x64]
+  artifactName: ${productName}-${version}-${arch}.${ext}
+  # Windows 上改 exe 图标/版本信息要 rcedit，而它来自 winCodeSign 压缩包，
+  # 里面含 macOS 的符号链接——解压需要管理员权限或开发者模式。
+  # 关掉这一步，安装包与快捷方式仍然用 build/icon.ico，
+  # 只是 win-unpacked 里的 electron.exe 保留 Electron 原生图标。
+  # 要改的话：设置 → 开发者选项 → 开发者模式，然后把这行删掉重打包。
+  signAndEditExecutable: false
+
+nsis:
+  # 不要一键安装：让用户能看到装到哪
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: DFTwork
+  # 卸载时保留用户数据（最近项目、AI 模型设置）
+  deleteAppDataOnUninstall: false
+
+portable:
+  artifactName: ${productName}-${version}-portable.${ext}
