@@ -1,4 +1,5 @@
 pub mod build;
+pub mod compare;
 pub mod convergence;
 pub mod force;
 pub mod input;
@@ -10,6 +11,7 @@ pub mod task;
 pub mod vibration;
 
 pub use build::*;
+pub use compare::*;
 pub use convergence::*;
 pub use force::*;
 pub use input::*;

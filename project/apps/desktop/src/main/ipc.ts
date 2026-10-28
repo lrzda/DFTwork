@@ -6,6 +6,7 @@ import {
   type ErrorPayload,
   type SceneRequest,
   type ScanRequest,
+  type CompareRequest,
   type TaskRequest,
 } from "@dftwork/shared";
 import { callCore } from "./core";
@@ -65,5 +66,8 @@ export function registerIpc(): void {
   );
   ipcMain.handle(IPC.magnetization, (_e, req: TaskRequest) =>
     wrap(() => callCore(["magnetization", req.taskAbsPath], 180_000)),
+  );
+  ipcMain.handle(IPC.compare, (_e, req: CompareRequest) =>
+    wrap(() => callCore(["compare", ...req.taskAbsPaths])),
   );
 }

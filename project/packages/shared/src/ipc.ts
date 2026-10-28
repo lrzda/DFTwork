@@ -15,6 +15,7 @@ export const IPC = {
   forces: "core:forces",
   vibrations: "core:vibrations",
   magnetization: "core:magnetization",
+  compare: "core:compare",
 } as const;
 
 export type IpcChannel = (typeof IPC)[keyof typeof IPC];
@@ -37,6 +38,11 @@ export interface SceneRequest {
    * - `false`：只按真实坐标距离，孤立分子、团簇或想看「盒子里实际摆成什么样」时用
    */
   pbc?: boolean;
+}
+
+/** 多任务对比。至少两个路径。 */
+export interface CompareRequest {
+  taskAbsPaths: string[];
 }
 
 /** 四项属性查询共用同一个入参形状：给任务目录或文件都行。 */
@@ -66,4 +72,5 @@ export interface DftworkApi {
   forces(req: TaskRequest): Promise<Envelope<ForcesResponse>>;
   vibrations(req: TaskRequest): Promise<Envelope<import("./dto").VibrationReport>>;
   magnetization(req: TaskRequest): Promise<Envelope<import("./dto").MagnetizationReport>>;
+  compare(req: CompareRequest): Promise<Envelope<import("./dto").CompareReport>>;
 }

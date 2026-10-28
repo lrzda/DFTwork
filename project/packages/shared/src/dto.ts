@@ -188,6 +188,21 @@ export interface MagnetizationReport {
   note: string;
 }
 
+export interface InputDiff {
+  key: string;
+  /** 与 tasks 一一对应，null 表示该任务没写这一项。 */
+  values: (string | null)[];
+}
+
+export interface CompareReport {
+  tasks: string[];
+  /** 只列取值不完全相同的参数。 */
+  input_diff: InputDiff[];
+  /** 完全一致的参数个数。 */
+  same_count: number;
+  series: ConvergenceSeries[];
+}
+
 export type Vec3 = [number, number, number];
 
 export interface Atom {

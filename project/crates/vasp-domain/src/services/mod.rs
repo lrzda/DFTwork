@@ -1,5 +1,6 @@
 // 模块本身私有，只导出函数——避免与 `model::*` 里的同名模块冲突。
 mod classify;
+mod compare;
 mod convergence;
 mod detect;
 mod elements;
@@ -13,6 +14,7 @@ mod stubs;
 mod vibrations;
 
 pub use classify::*;
+pub use compare::*;
 pub use convergence::*;
 pub use detect::*;
 pub use elements::*;

@@ -17,6 +17,7 @@ fn main() {
         Commands::Scf { task } => commands::scf(&task),
         Commands::Forces { task } => commands::forces(&task),
         Commands::Vibrations { task } => commands::vibrations(&task),
+        Commands::Compare { tasks } => commands::compare(&tasks),
         Commands::HermesProbe => commands::hermes_probe(),
         Commands::Version => commands::version(),
     };

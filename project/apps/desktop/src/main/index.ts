@@ -58,6 +58,7 @@ function createWindow(): void {
     if (process.env.DFTWORK_SMOKE_PANEL) query.panel = process.env.DFTWORK_SMOKE_PANEL;
     // 冒烟时指定要选中的任务（默认自动选第一个已完成的任务）
     if (process.env.DFTWORK_SMOKE_TASK) query.task = process.env.DFTWORK_SMOKE_TASK;
+    if (process.env.DFTWORK_SMOKE_COMPARE) query.compare = process.env.DFTWORK_SMOKE_COMPARE;
     void win.loadFile(
       path.join(__dirname, "../renderer/index.html"),
       Object.keys(query).length > 0 ? { query } : undefined,

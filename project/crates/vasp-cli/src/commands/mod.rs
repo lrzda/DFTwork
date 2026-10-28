@@ -1,8 +1,8 @@
 use vasp_domain::{BondMode, Hermes};
 use vasp_infrastructure::{HermesCli, LocalFs};
 use vasp_application::{
-    GetConvergence, GetForces, GetMagnetization, GetScf, GetStructureScene, GetVibrations,
-    ScanProject,
+    CompareTasks, GetConvergence, GetForces, GetMagnetization, GetScf, GetStructureScene,
+    GetVibrations, ScanProject,
 };
 
 use crate::support::SystemClock;
@@ -68,6 +68,13 @@ pub fn forces(task: &str) -> anyhow::Result<()> {
 pub fn vibrations(task: &str) -> anyhow::Result<()> {
     let fs = LocalFs::new();
     let report = GetVibrations::new(&fs).execute(Path::new(task))?;
+    emit(&serde_json::json!({ "ok": true, "data": report }))
+}
+
+pub fn compare(tasks: &[String]) -> anyhow::Result<()> {
+    let fs = LocalFs::new();
+    let paths: Vec<std::path::PathBuf> = tasks.iter().map(std::path::PathBuf::from).collect();
+    let report = CompareTasks::new(&fs).execute(&paths)?;
     emit(&serde_json::json!({ "ok": true, "data": report }))
 }
 

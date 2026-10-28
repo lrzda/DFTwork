@@ -63,6 +63,13 @@ pub enum Commands {
         task: String,
     },
 
+    /// 对比多个任务：INCAR 差异 + 收敛曲线。
+    Compare {
+        /// 至少两个任务目录。
+        #[arg(required = true, num_args = 2..)]
+        tasks: Vec<String>,
+    },
+
     /// 探测 Hermes 是否可用（缺席是正常状态）。
     HermesProbe,
 

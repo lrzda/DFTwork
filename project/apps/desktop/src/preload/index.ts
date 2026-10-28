@@ -16,6 +16,7 @@ const api: DftworkApi = {
   forces: (req) => ipcRenderer.invoke(IPC.forces, req),
   vibrations: (req) => ipcRenderer.invoke(IPC.vibrations, req),
   magnetization: (req) => ipcRenderer.invoke(IPC.magnetization, req),
+  compare: (req) => ipcRenderer.invoke(IPC.compare, req),
 };
 
 contextBridge.exposeInMainWorld("dftwork", api);

@@ -1,4 +1,5 @@
 import type {
+  CompareReport,
   ConvergenceSeries,
   DftworkApi,
   Envelope,
@@ -69,6 +70,8 @@ export const api = {
     unwrap(bridge().vibrations({ taskAbsPath })),
   magnetization: (taskAbsPath: string): Promise<MagnetizationReport> =>
     unwrap(bridge().magnetization({ taskAbsPath })),
+  compare: (taskAbsPaths: string[]): Promise<CompareReport> =>
+    unwrap(bridge().compare({ taskAbsPaths })),
 };
 
 /** 把任意异常转成一句人话，用于界面提示。 */

@@ -12,6 +12,7 @@ import {
   BarChart,
   CartesianGrid,
   Cell,
+  Legend,
   Line,
   LineChart,
   ReferenceLine,
@@ -21,7 +22,9 @@ import {
   YAxis,
 } from "recharts";
 import type {
+  CompareReport,
   ForcesResponse,
+  InputDiff,
   MagnetizationReport,
   ScfSeries,
   VibrationReport,
@@ -447,6 +450,134 @@ export function MagnetizationPanel({ data }: { data: MagnetizationReport | null 
         共 {data.steps.length} 个离子步。球间磁矩是原子球之间区域的贡献，
         它与总磁矩之差近似为「球内」磁矩总和。
       </Text>
+    </Space>
+  );
+}
+
+// ───────────────────────────── 多任务对比 ─────────────────────────────
+
+const COMPARE_COLORS = ["#69b1ff", "#95de64", "#ffc53d", "#ff7875", "#b37feb"];
+
+/**
+ * 多任务对比：INCAR 差异表 + 收敛曲线叠加。
+ *
+ * 差异表只列**不完全相同**的参数——几十项全列出来，真正要看的那两三行会被淹掉。
+ * 注意「值不同」不等于「物理上不同」：`1.0E-6` 和 `0.1E-05` 是同一个数，
+ * 这里如实显示原文差异，判断留给用户。
+ */
+export function ComparePanel({ data }: { data: CompareReport | null }) {
+  // 把各任务的离子步按 step 合并成一张表，供多线叠加
+  const merged = useMemo(() => {
+    if (!data) return [];
+    const byStep = new Map<number, Record<string, number | null>>();
+    data.series.forEach((s, i) => {
+      for (const step of s.steps) {
+        const row = byStep.get(step.index) ?? { step: step.index };
+        row[`e${i}`] = step.energy_ev ?? null;
+        row[`f${i}`] = step.max_force_ev_per_a ?? null;
+        byStep.set(step.index, row);
+      }
+    });
+    return [...byStep.values()].sort((a, b) => (a.step as number) - (b.step as number));
+  }, [data]);
+
+  if (!data) {
+    return <Empty description="在左侧任务表勾选两个以上任务，然后点「对比」" />;
+  }
+
+  return (
+    <Space direction="vertical" size={10} style={{ width: "100%" }}>
+      <Space size={8} wrap>
+        {data.tasks.map((name, i) => (
+          <Tag key={name} color={COMPARE_COLORS[i % COMPARE_COLORS.length]}>
+            {name}
+          </Tag>
+        ))}
+        <Text type="secondary" style={{ fontSize: 12 }}>
+          相同参数 {data.same_count} 项 · 差异 {data.input_diff.length} 项
+        </Text>
+      </Space>
+
+      {data.input_diff.length === 0 ? (
+        <Alert type="success" showIcon message="这些任务的 INCAR 完全相同" />
+      ) : (
+        <Card size="small" title="INCAR 差异" styles={{ body: { padding: 0, maxHeight: 170, overflow: "auto" } }}>
+          <Table
+            size="small"
+            pagination={false}
+            rowKey="key"
+            dataSource={data.input_diff}
+            columns={[
+              {
+                title: "参数",
+                dataIndex: "key",
+                width: 130,
+                fixed: "left",
+                render: (v: string) => <Text code>{v}</Text>,
+              },
+              ...data.tasks.map((name, i) => ({
+                title: name,
+                key: `t${i}`,
+                render: (_: unknown, r: InputDiff) => {
+                  const v = r.values[i];
+                  return v === null ? (
+                    <Text type="secondary">未设置</Text>
+                  ) : (
+                    <span style={{ color: COMPARE_COLORS[i % COMPARE_COLORS.length] }}>{v}</span>
+                  );
+                },
+              })),
+            ]}
+          />
+        </Card>
+      )}
+
+      <div style={{ height: 150 }}>
+        <ResponsiveContainer width="100%" height="100%">
+          <LineChart data={merged} margin={{ top: 6, right: 12, bottom: 4, left: 6 }}>
+            <CartesianGrid strokeDasharray="3 3" opacity={0.28} />
+            <XAxis dataKey="step" tick={{ fontSize: 11 }} />
+            <YAxis tick={{ fontSize: 11 }} width={76} />
+            <Tooltip />
+            <Legend iconSize={8} wrapperStyle={{ fontSize: 11 }} />
+            {data.series.map((s, i) => (
+              <Line
+                key={`e${i}`}
+                type="monotone"
+                dataKey={`e${i}`}
+                name={`${data.tasks[i]} F`}
+                dot={false}
+                strokeWidth={2}
+                stroke={COMPARE_COLORS[i % COMPARE_COLORS.length]}
+              />
+            ))}
+          </LineChart>
+        </ResponsiveContainer>
+      </div>
+
+      <div style={{ height: 140 }}>
+        <ResponsiveContainer width="100%" height="100%">
+          <LineChart data={merged} margin={{ top: 6, right: 12, bottom: 4, left: 6 }}>
+            <CartesianGrid strokeDasharray="3 3" opacity={0.28} />
+            <XAxis dataKey="step" tick={{ fontSize: 11 }} />
+            <YAxis tick={{ fontSize: 11 }} width={76} unit=" eV/Å" />
+            <Tooltip />
+            <Legend iconSize={8} wrapperStyle={{ fontSize: 11 }} />
+            {data.series.map((s, i) => (
+              <Line
+                key={`f${i}`}
+                type="monotone"
+                dataKey={`f${i}`}
+                name={`${data.tasks[i]} maxF`}
+                dot={false}
+                strokeWidth={2}
+                strokeDasharray="4 3"
+                stroke={COMPARE_COLORS[i % COMPARE_COLORS.length]}
+              />
+            ))}
+          </LineChart>
+        </ResponsiveContainer>
+      </div>
     </Space>
   );
 }

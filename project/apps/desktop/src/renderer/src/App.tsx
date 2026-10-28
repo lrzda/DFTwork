@@ -23,6 +23,7 @@ import {
   YAxis,
 } from "recharts";
 import type {
+  CompareReport,
   ConvergenceSeries,
   ForcesResponse,
   HermesCapability,
@@ -37,6 +38,7 @@ import type {
 } from "@dftwork/shared";
 import { api, describeError } from "./api";
 import {
+  ComparePanel,
   ForcePanel,
   MagnetizationPanel,
   ScfPanel,
@@ -54,7 +56,8 @@ type PanelKey =
   | "scf"
   | "vibration"
   | "force"
-  | "magnetization";
+  | "magnetization"
+  | "compare";
 
 const STATUS_COLOR: Record<TaskStatusCode, string> = {
   TASK_COMPLETED: "green",
@@ -98,6 +101,9 @@ export default function App(): JSX.Element {
   const [vibData, setVibData] = useState<VibrationReport | null>(null);
   const [magData, setMagData] = useState<MagnetizationReport | null>(null);
   const [panelLoading, setPanelLoading] = useState<string | null>(null);
+  /** 左侧表格里勾选的任务（rel_path），用于多任务对比。 */
+  const [checked, setChecked] = useState<string[]>([]);
+  const [compareData, setCompareData] = useState<CompareReport | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [ver, setVer] = useState<VersionInfo | null>(null);
   const [hermes, setHermes] = useState<HermesCapability | null>(null);
@@ -197,6 +203,24 @@ export default function App(): JSX.Element {
     [selected, fetchScene],
   );
 
+  /** 对比勾选的任务。至少两个才有意义。 */
+  const doCompare = useCallback(async (): Promise<void> => {
+    if (!report || checked.length < 2) return;
+    setPanelLoading("compare");
+    try {
+      const paths = checked
+        .map((rel) => report.tasks.find((t) => t.rel_path === rel))
+        .filter((t): t is TaskSummary => Boolean(t))
+        .map((t) => absPathOf(t));
+      setCompareData(await api.compare(paths));
+      setRightTab("compare");
+    } catch (e) {
+      setError(describeError(e));
+    } finally {
+      setPanelLoading(null);
+    }
+  }, [report, checked, absPathOf]);
+
   // 属性面板**按需加载**：切到哪个标签页才请求哪个。
   // 一选中任务就把 OUTCAR 扫三遍（力、振动、磁矩各一遍）是纯浪费，
   // 几百 MB 的文件每遍要 10 秒。
@@ -240,6 +264,24 @@ export default function App(): JSX.Element {
       cancelled = true;
     };
   }, [rightTab, selected, absPathOf, scfData, forceData, vibData, magData]);
+
+  // `?compare=<rel1>,<rel2>`：自动勾选这些任务（冒烟截图与分享链接用）
+  useEffect(() => {
+    if (!bootProject || !report || checked.length > 0) return;
+    const wanted = new URLSearchParams(window.location.search).get("compare");
+    if (!wanted) return;
+    const keys = wanted
+      .split(",")
+      .map((k) => k.trim())
+      .filter((k) => report.tasks.some((t) => t.rel_path === k));
+    if (keys.length >= 2) setChecked(keys);
+  }, [report, bootProject, checked]);
+
+  // 勾选够了就自动跑对比，不用再点按钮
+  useEffect(() => {
+    if (!report || checked.length < 2 || compareData) return;
+    void doCompare();
+  }, [report, checked, compareData, doCompare]);
 
   // 冒烟模式：扫完自动选中一个任务，让面板有内容可截。
   // `?task=<rel_path>` 可指定具体任务；否则选第一个已完成的。
@@ -344,6 +386,13 @@ export default function App(): JSX.Element {
               : "扫描结果"
           }
           className="left"
+          extra={
+            checked.length >= 2 ? (
+              <Button size="small" type="primary" onClick={() => void doCompare()}>
+                对比这 {checked.length} 个
+              </Button>
+            ) : null
+          }
         >
           <Spin spinning={scanning}>
             <Tabs
@@ -362,6 +411,11 @@ export default function App(): JSX.Element {
                         columns={columns}
                         dataSource={report.tasks}
                         pagination={{ pageSize: 50, size: "small" }}
+                        rowSelection={{
+                          selectedRowKeys: checked,
+                          onChange: (keys) => setChecked(keys as string[]),
+                          columnWidth: 32,
+                        }}
                         onRow={(r) => ({
                           onClick: () => void pick(r),
                           style: {
@@ -467,6 +521,11 @@ export default function App(): JSX.Element {
                 key: "magnetization",
                 label: "磁矩",
                 children: <MagnetizationPanel data={magData} />,
+              },
+              {
+                key: "compare",
+                label: "对比",
+                children: <ComparePanel data={compareData} />,
               },
             ]}
           />
