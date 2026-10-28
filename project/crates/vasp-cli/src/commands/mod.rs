@@ -1,6 +1,6 @@
 use vasp_domain::{BondMode, Hermes};
 use vasp_infrastructure::{HermesCli, LocalFs};
-use vasp_application::{GetConvergence, GetStructureScene, ScanProject};
+use vasp_application::{GetConvergence, GetMagnetization, GetStructureScene, ScanProject};
 
 use crate::support::SystemClock;
 use std::path::Path;
@@ -39,6 +39,12 @@ pub fn scene(file: &str, no_pbc: bool) -> anyhow::Result<()> {
     };
     let scene = GetStructureScene::new(&fs).execute(Path::new(file), mode)?;
     emit(&serde_json::json!({ "ok": true, "data": scene }))
+}
+
+pub fn magnetization(task: &str) -> anyhow::Result<()> {
+    let fs = LocalFs::new();
+    let report = GetMagnetization::new(&fs).execute(Path::new(task))?;
+    emit(&serde_json::json!({ "ok": true, "data": report }))
 }
 
 pub fn hermes_probe() -> anyhow::Result<()> {

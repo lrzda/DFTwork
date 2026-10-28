@@ -13,6 +13,7 @@ fn main() {
         Commands::Scan { root, max_depth } => commands::scan(&root, max_depth),
         Commands::Convergence { task } => commands::convergence(&task),
         Commands::Scene { file, no_pbc } => commands::scene(&file, no_pbc),
+        Commands::Magnetization { task } => commands::magnetization(&task),
         Commands::HermesProbe => commands::hermes_probe(),
         Commands::Version => commands::version(),
     };

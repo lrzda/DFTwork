@@ -39,6 +39,12 @@ pub enum Commands {
         no_pbc: bool,
     },
 
+    /// 提取磁矩（每个离子步的总磁矩）。
+    Magnetization {
+        /// 任务目录，或直接给 OUTCAR 路径。
+        task: String,
+    },
+
     /// 探测 Hermes 是否可用（缺席是正常状态）。
     HermesProbe,
 

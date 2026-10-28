@@ -76,6 +76,39 @@ impl Fs for LocalFs {
         Ok(decode_text(&buf))
     }
 
+    /// 按行流式扫描。用 `read_until` 而不是 `lines()`：
+    /// `lines()` 遇到非 UTF-8 字节会直接报错，而 OUTCAR 里混进乱码字节并不罕见。
+    fn scan_lines(
+        &self,
+        path: &Path,
+        visit: &mut dyn FnMut(&str) -> bool,
+    ) -> AppResult<usize> {
+        use std::io::BufRead;
+
+        let file =
+            std::fs::File::open(path).map_err(|e| AppError::io(path.display().to_string(), e))?;
+        // 1 MB 缓冲：几百 MB 的文件靠它把 syscall 次数压下来
+        let mut reader = std::io::BufReader::with_capacity(1 << 20, file);
+        let mut buf = Vec::with_capacity(512);
+        let mut count = 0usize;
+
+        loop {
+            buf.clear();
+            let n = reader
+                .read_until(b'\n', &mut buf)
+                .map_err(|e| AppError::io(path.display().to_string(), e))?;
+            if n == 0 {
+                break;
+            }
+            count += 1;
+            let line = decode_text(&buf);
+            if !visit(line.trim_end_matches(['\r', '\n'])) {
+                break;
+            }
+        }
+        Ok(count)
+    }
+
     fn exists(&self, path: &Path) -> bool {
         path.exists()
     }

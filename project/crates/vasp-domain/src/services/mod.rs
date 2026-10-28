@@ -5,6 +5,7 @@ mod detect;
 mod elements;
 mod geometry;
 mod incar;
+mod magnetization;
 mod structure;
 mod stubs;
 
@@ -14,5 +15,6 @@ pub use detect::*;
 pub use elements::*;
 pub use geometry::*;
 pub use incar::*;
+pub use magnetization::*;
 pub use structure::*;
 pub use stubs::*;

@@ -24,6 +24,22 @@ pub trait Fs: Send + Sync {
     /// 读尾部，用于 OUTCAR 这种几十 MB 的文件。
     fn read_tail(&self, path: &Path, max_bytes: u64) -> Result<String, AppError>;
 
+    /// 按行流式扫描，用于几百 MB 的 OUTCAR / OSZICAR。
+    ///
+    /// `visit` 返回 `false` 表示提前结束（找到目标块就不用读到底）。
+    /// 返回实际读过的行数，便于诊断「到底扫了多少」。
+    ///
+    /// 之所以要有这个方法：`某个大体系` 的 OUTCAR 有 几百 MB / 数百万行，
+    /// `某 MD 轨迹` 有 几百 MB。这类文件既不能整读进内存（[`Read_text`] 的 64 MB 上限），
+    /// 也不能只读尾部（频率块、磁矩块常在文件中部）。
+    ///
+    /// [`Read_text`]: Fs::read_text
+    fn scan_lines(
+        &self,
+        path: &Path,
+        visit: &mut dyn FnMut(&str) -> bool,
+    ) -> Result<usize, AppError>;
+
     fn exists(&self, path: &Path) -> bool;
 
     /// 是否是目录。
