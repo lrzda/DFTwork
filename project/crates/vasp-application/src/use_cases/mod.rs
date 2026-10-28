@@ -1,3 +1,4 @@
+mod analyze_task;
 mod apply_plan;
 mod build_inputs;
 mod compare_tasks;
@@ -9,6 +10,7 @@ mod get_structure_scene;
 mod pending;
 mod scan_project;
 
+pub use analyze_task::*;
 pub use apply_plan::*;
 pub use build_inputs::*;
 pub use compare_tasks::*;

@@ -1,3 +1,4 @@
+pub mod analysis;
 pub mod build;
 pub mod compare;
 pub mod convergence;
@@ -10,6 +11,7 @@ pub mod structure;
 pub mod task;
 pub mod vibration;
 
+pub use analysis::*;
 pub use build::*;
 pub use compare::*;
 pub use convergence::*;

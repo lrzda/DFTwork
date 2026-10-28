@@ -23,6 +23,16 @@ fn main() {
         }
         Commands::Apply { plan } => commands::apply(&plan),
         Commands::Rollback { receipt } => commands::rollback(&receipt),
+        Commands::Analyze { task, model, provider, hermes_bin, max_turns, timeout } => {
+            commands::analyze(
+                &task,
+                model.as_deref(),
+                provider.as_deref(),
+                hermes_bin.as_deref(),
+                max_turns,
+                timeout,
+            )
+        }
         Commands::HermesProbe => commands::hermes_probe(),
         Commands::Version => commands::version(),
     };

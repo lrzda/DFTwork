@@ -1,8 +1,8 @@
 use vasp_domain::{BondMode, Hermes};
 use vasp_application::ports::Fs as FsPort;
-use vasp_infrastructure::{HermesCli, LocalFs};
+use vasp_infrastructure::{HermesCli, HermesRunner, LocalFs};
 use vasp_application::{
-    ApplyPlan, BuildInputs, BuildRequest, CompareTasks, GetConvergence, GetForces, GetMagnetization, GetScf, GetStructureScene,
+    AnalyzeTask, ApplyPlan, BuildInputs, BuildRequest, CompareTasks, GetConvergence, GetForces, GetMagnetization, GetScf, GetStructureScene,
     GetVibrations, Rollback, ScanProject,
 };
 
@@ -165,6 +165,28 @@ pub fn rollback(receipt_path: &str) -> anyhow::Result<()> {
     let receipt: vasp_domain::BuildReceipt = serde_json::from_str(&text)?;
     let root = std::path::PathBuf::from(&receipt.root);
     let report = Rollback::new(&fs, &clock).execute(&receipt, &root)?;
+    emit(&serde_json::json!({ "ok": true, "data": report }))
+}
+
+pub fn analyze(
+    task: &str,
+    model: Option<&str>,
+    provider: Option<&str>,
+    hermes_bin: Option<&str>,
+    max_turns: u32,
+    timeout: u64,
+) -> anyhow::Result<()> {
+    let fs = LocalFs::new();
+    let bin = hermes_bin
+        .map(|s| s.to_string())
+        .or_else(|| std::env::var("HERMES_BIN").ok())
+        .unwrap_or_else(|| "hermes".to_string());
+    let runner = HermesRunner::new(bin)
+        .with_model(model.map(|s| s.to_string()))
+        .with_provider(provider.map(|s| s.to_string()))
+        .with_max_turns(max_turns)
+        .with_timeout(timeout);
+    let report = AnalyzeTask::new(&fs, &runner).execute(std::path::Path::new(task))?;
     emit(&serde_json::json!({ "ok": true, "data": report }))
 }
 

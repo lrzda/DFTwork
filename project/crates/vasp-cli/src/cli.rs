@@ -99,6 +99,26 @@ pub enum Commands {
         receipt: String,
     },
 
+    /// 让 AI 分析一个任务（需要本机装有 Hermes；没有也能用其他功能）。
+    Analyze {
+        /// 任务目录。
+        task: String,
+        /// 模型；`--ignore-user-config` 下必须显式给。
+        #[arg(long)]
+        model: Option<String>,
+        /// 提供方（deepseek / openrouter / anthropic …）。
+        #[arg(long)]
+        provider: Option<String>,
+        /// hermes 可执行文件路径；缺省用 PATH 里的 hermes。
+        #[arg(long)]
+        hermes_bin: Option<String>,
+        #[arg(long, default_value_t = 2)]
+        max_turns: u32,
+        /// 超时秒数（超时由我们 kill 子进程，CLI 的 --run-budget 不支持）。
+        #[arg(long, default_value_t = 180)]
+        timeout: u64,
+    },
+
     /// 探测 Hermes 是否可用（缺席是正常状态）。
     HermesProbe,
 

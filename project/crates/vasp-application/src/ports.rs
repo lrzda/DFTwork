@@ -1,5 +1,6 @@
 use crate::AppError;
 use std::path::Path;
+use vasp_domain::AnalysisReport;
 
 /// 目录项。只保留判定需要的信息，不返回平台相关的元数据结构。
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -58,6 +59,14 @@ pub trait Fs: Send + Sync {
     ///
     /// 文件本来就不存在时视为成功：回滚要幂等，重复执行不该报错。
     fn remove_file(&self, path: &Path) -> Result<(), AppError>;
+}
+
+/// 把一段提示词交给外部 AI，拿回一次分析结果。
+///
+/// 放在 application 而不是 infrastructure：用例要调用它，但不能依赖
+/// 具体实现（`HermesRunner`）。测试里可以换成假实现，不需要真跑 CLI。
+pub trait Analyzer: Send + Sync {
+    fn ask(&self, prompt: &str) -> Result<AnalysisReport, AppError>;
 }
 
 /// 单个文件读取上限：64 MB。超过时调用方应改用 [`Fs::read_tail`]。

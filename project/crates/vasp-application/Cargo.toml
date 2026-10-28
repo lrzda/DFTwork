@@ -8,6 +8,7 @@ description = "14 个用例：编排领域能力、读文件、组装 DTO。"
 [dependencies]
 vasp-domain = { path = "../vasp-domain" }
 serde = { workspace = true }
+serde_json = { workspace = true }
 thiserror = { workspace = true }
 time = { workspace = true }
 tracing = { workspace = true }

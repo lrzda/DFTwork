@@ -86,14 +86,6 @@ impl ApproveBuild {
     }
 }
 
-/// 发起一次 AI 分析（Hermes 可缺席）。
-pub struct AnalyzeTask;
-impl AnalyzeTask {
-    pub fn execute(_rel: &str, _intent: &str) -> AppResult<()> {
-        todo("AnalyzeTask（需要 Hermes 端口）")
-    }
-}
-
 /// 续接上一次分析。
 pub struct ContinueAnalysis;
 impl ContinueAnalysis {
