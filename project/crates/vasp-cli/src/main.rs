@@ -14,6 +14,9 @@ fn main() {
         Commands::Convergence { task } => commands::convergence(&task),
         Commands::Scene { file, no_pbc } => commands::scene(&file, no_pbc),
         Commands::Magnetization { task } => commands::magnetization(&task),
+        Commands::Scf { task } => commands::scf(&task),
+        Commands::Forces { task } => commands::forces(&task),
+        Commands::Vibrations { task } => commands::vibrations(&task),
         Commands::HermesProbe => commands::hermes_probe(),
         Commands::Version => commands::version(),
     };

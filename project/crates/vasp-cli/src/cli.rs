@@ -45,6 +45,24 @@ pub enum Commands {
         task: String,
     },
 
+    /// SCF 电子步收敛序列（每个离子步内部的迭代）。
+    Scf {
+        /// 任务目录，或直接给 OSZICAR 路径。
+        task: String,
+    },
+
+    /// 每原子力矢量与晶胞应力。
+    Forces {
+        /// 任务目录，或直接给 OUTCAR 路径。
+        task: String,
+    },
+
+    /// 振动频率与力常数矩阵。
+    Vibrations {
+        /// 任务目录，或直接给 OUTCAR 路径。
+        task: String,
+    },
+
     /// 探测 Hermes 是否可用（缺席是正常状态）。
     HermesProbe,
 

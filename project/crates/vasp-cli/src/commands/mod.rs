@@ -1,6 +1,9 @@
 use vasp_domain::{BondMode, Hermes};
 use vasp_infrastructure::{HermesCli, LocalFs};
-use vasp_application::{GetConvergence, GetMagnetization, GetStructureScene, ScanProject};
+use vasp_application::{
+    GetConvergence, GetForces, GetMagnetization, GetScf, GetStructureScene, GetVibrations,
+    ScanProject,
+};
 
 use crate::support::SystemClock;
 use std::path::Path;
@@ -44,6 +47,27 @@ pub fn scene(file: &str, no_pbc: bool) -> anyhow::Result<()> {
 pub fn magnetization(task: &str) -> anyhow::Result<()> {
     let fs = LocalFs::new();
     let report = GetMagnetization::new(&fs).execute(Path::new(task))?;
+    emit(&serde_json::json!({ "ok": true, "data": report }))
+}
+
+pub fn scf(task: &str) -> anyhow::Result<()> {
+    let fs = LocalFs::new();
+    let series = GetScf::new(&fs).execute(Path::new(task))?;
+    emit(&serde_json::json!({ "ok": true, "data": series }))
+}
+
+pub fn forces(task: &str) -> anyhow::Result<()> {
+    let fs = LocalFs::new();
+    let (forces, stress) = GetForces::new(&fs).execute(Path::new(task))?;
+    emit(&serde_json::json!({
+        "ok": true,
+        "data": { "forces": forces, "stress": stress }
+    }))
+}
+
+pub fn vibrations(task: &str) -> anyhow::Result<()> {
+    let fs = LocalFs::new();
+    let report = GetVibrations::new(&fs).execute(Path::new(task))?;
     emit(&serde_json::json!({ "ok": true, "data": report }))
 }
 
