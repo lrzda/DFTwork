@@ -46,7 +46,7 @@ fn ionic_marker_re() -> &'static Regex {
 }
 
 /// 力 + 应力的联合扫描器。两者在同一个文件里、同一轮扫描中提取，
-/// 避免为了两段数据读两遍 几百 MB。
+/// 避免为了两段数据把大文件读两遍。
 #[derive(Debug, Default)]
 pub struct ForceStressScanner {
     /// 是否处在「力表头已出现、还在等虚线」的状态

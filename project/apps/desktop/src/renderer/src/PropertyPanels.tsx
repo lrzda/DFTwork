@@ -3,7 +3,7 @@
  *
  * 每个面板都是纯展示组件——数据由 `App` 按需加载后传进来，
  * 面板自己不发起 IPC。这样切标签页时才请求，不会一选中任务就
- * 把 几百 MB 的 OUTCAR 扫三遍。
+ * 把几百 MB 的 OUTCAR 扫三遍。
  */
 import { useMemo, useState } from "react";
 import { Alert, Card, Empty, Segmented, Space, Statistic, Table, Tag, Typography } from "antd";

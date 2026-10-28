@@ -42,7 +42,7 @@ pub struct VibrationReport {
     /// 全部振动模式，**保持 OUTCAR 的原始顺序**。
     ///
     /// VASP 的排序不是单调的：实频从高到低（例如 13.97 → 0.587 THz），
-    /// 虚频紧接着从低到高（0.044 → 十几 THz）。所以「第一个元素」既不是
+    /// 虚频紧接着从低到高（接近 0 → 十几 THz）。所以「第一个元素」既不是
     /// 最低频也不是最高频——要最低频请用 [`VibrationReport::lowest_thz`]。
     pub modes: Vec<VibrationalMode>,
     /// 虚频个数。非零说明结构在简谐近似下不稳定——界面必须显著标出。

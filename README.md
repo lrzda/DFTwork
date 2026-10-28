@@ -9,14 +9,14 @@ VASP 计算任务工作台（Windows 桌面软件）。
 
 | 能力 | CLI | 界面 | 实测 |
 |---|---|---|---|
-| 扫描项目、判定状态与任务类型 | `scan` | 任务表 + 统计看板 | 4 任务 / 6 目录 / 6 ms |
+| 扫描项目、判定状态与任务类型 | `scan` | 任务表 + 统计看板 | 多任务 / 多目录 |
 | 离子步能量 + 最大力 | `convergence` | 收敛曲线 | 数百步 |
-| SCF 电子步迭代 | `scf` | 对数残差曲线 | 500 步 |
-| 每原子力 + 应力张量 | `forces` | 受力排行 + 应力表 | 多个原子 / maxF 1.2345678 |
-| 振动频率 + 力常数矩阵 | `vibrations` | 频谱柱图 + 矩阵热图 | 多个模式 / 17 虚频 |
-| 总磁矩演化 | `magnetization` | 磁矩曲线 | 数百步 / 15.00→30.13 μB |
-| 3D 结构（成键 / PBC / 镜像原子） | `scene` | three.js 看板 | 一批键 |
-| 多任务对比（INCAR diff + 曲线） | `compare` | 差异表 + 叠加图 | 相同 7 / 差异 25 |
+| SCF 电子步迭代 | `scf` | 对数残差曲线 | 数百步 |
+| 每原子力 + 应力张量 | `forces` | 受力排行 + 应力表 | 逐原子 + 六分量 |
+| 振动频率 + 力常数矩阵 | `vibrations` | 频谱柱图 + 热图 | 模式数 + 虚频标记 |
+| 总磁矩演化 | `magnetization` | 磁矩曲线 | 逐步演化 |
+| 3D 结构（成键 / PBC / 镜像原子） | `scene` | three.js 看板 | 球棍 + 晶胞 |
+| 多任务对比（INCAR diff + 曲线） | `compare` | 差异表 + 叠加图 | 差异项逐条列出 |
 
 内核 `vaspcore.exe` 的每条命令都输出**恰好一行 JSON**（`{"ok":true,"data":…}`），
 界面里看到的每个数字都来自同一次解析——UI 与 AI 工具共用同一个内核，避免结论漂移。
@@ -60,7 +60,7 @@ node_modules/.pnpm/electron@*/node_modules/electron/dist/electron.exe apps/deskt
 
 这几条都是实测撞出来的，不是设计时的猜测：
 
-- **大文件必须流式**：单份 OUTCAR 可达 几百 MB / 数百万行，既超整读上限，
+- **大文件必须流式**：单份 OUTCAR 可达几百 MB / 数百万行，既超整读上限，
   也不能只读尾部（频率块、磁矩块在中部）。`Fs::scan_lines` 用 `read_until`
   而非 `lines()`——后者遇非 UTF-8 字节直接报错。
 - **成键判据改过**：原 VASPFlow 注释写 pymatgen `MinimumDistanceNN`，代码实际是
@@ -75,7 +75,7 @@ node_modules/.pnpm/electron@*/node_modules/electron/dist/electron.exe apps/deskt
 - **逐原子磁矩缺失**：本机所有 `ISPIN=2` 的 OUTCAR 都没有 `magnetization (x)` 表
   （VASP 5.4.4，`NWRITE` 1 与 2 都没有）。返回 `per_atom_available=false` + 原因，
   而不是空数组（空数组会让人误以为「所有原子磁矩为 0」）。
-- **热力学量不做**：Γ 点简谐 ZPE/S/G 理论上 VASP 会输出，但实测体系 多个虚频使
+- **热力学量不做**：Γ 点简谐 ZPE/S/G 理论上 VASP 会输出，但实测体系虚频很多使
   简谐近似无意义，完整振动自由能需 phonopy。
 
 ## 来源与许可

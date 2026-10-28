@@ -119,11 +119,11 @@ mod tests {
     use super::*;
 
     const SAMPLE: &str = "\
-    DAV:   1     -0.123456789012E+03    0.47236E+04   -0.19626E+05  1328   0.126E+03
-    DAV:   2     -0.111111111111E+03   -0.41734E+04   -0.37783E+04  1488   0.295E+02
-      1 F= -.23456789E+03 E0= -.23456789E+03  d E =-.442682E+03
-    DAV:   1    -0.442682027688E+03    0.41684E-04   -0.45625E-05  1544   0.110E-02    0.620E-02
-      2 F= -.23456789E+03 E0= -.23456789E+03  d E =-.442682E+03
+    DAV:   1    -0.123456789012E+03    0.15000E+04   -0.24691E+05  1000   0.250E+03
+    DAV:   2    -0.111111111111E+03   -0.11111E+04   -0.37783E+04  1200   0.300E+02
+      1 F= -.23456789E+03 E0= -.23456789E+03  d E =-.123457E+03
+    DAV:   1    -0.234568012345E+03    0.40000E-04   -0.50000E-05  1300   0.120E-02    0.620E-02
+      2 F= -.23456789E+03 E0= -.23456789E+03  d E =-.123457E+03
 ";
 
     #[test]
@@ -143,10 +143,10 @@ mod tests {
         let st = &s.blocks[0].steps[0];
         assert_eq!(st.algorithm, "DAV");
         assert_eq!(st.index, 1);
-        assert!((st.energy_ev - -123.456789).abs() < 1e-6);
-        assert!((st.delta_e_ev.unwrap() - -123.456789).abs() < 1e-3);
-        assert_eq!(st.ncg, Some(1328));
-        assert!((st.rms.unwrap() - 126.0).abs() < 1e-6);
+        assert!((st.energy_ev - (-123.456789012)).abs() < 1e-6);
+        assert!((st.delta_e_ev.unwrap() - 1500.0).abs() < 1e-3);
+        assert_eq!(st.ncg, Some(1000));
+        assert!((st.rms.unwrap() - 250.0).abs() < 1e-6);
         assert!(st.rms_c.is_none(), "第一行没有 rms(c)");
     }
 

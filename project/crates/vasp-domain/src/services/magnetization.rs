@@ -49,8 +49,8 @@ fn per_atom_re() -> &'static Regex {
 
 /// 流式扫描器：喂 OUTCAR 的每一行，最后取出结果。
 ///
-/// 为什么是状态机而不是一次性解析：`某个大体系` 的 OUTCAR 有 几百 MB、
-/// `某 MD 轨迹` 有 几百 MB，不能整读进内存。配合 [`Fs::scan_lines`] 使用。
+/// 为什么是状态机而不是一次性解析：单份 OUTCAR 可达几百 MB，
+/// 不能整读进内存。配合 [`Fs::scan_lines`] 使用。
 ///
 /// [`Fs::scan_lines`]: vasp_application::ports::Fs::scan_lines
 #[derive(Debug, Default)]
@@ -141,7 +141,7 @@ mod tests {
     fn collects_one_step_from_typical_block() {
         let mut s = MagnetizationScanner::new();
         s.feed(" number of electron     123.4567890 magnetization      12.3456789");
-        s.feed(" augmentation part        9.4486309 magnetization      6.7890123");
+        s.feed(" augmentation part        4.5678901 magnetization       6.7890123");
         s.feed("  FREE ENERGIE OF THE ION-ELECTRON SYSTEM (eV)");
         let (steps, per_atom, _note) = s.finish();
         assert_eq!(steps.len(), 1);

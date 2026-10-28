@@ -1,13 +1,12 @@
 //! 从 OUTCAR 提取振动频率与力常数矩阵。
 //!
-//! 两段数据都在文件中部（`某个频率任务` 的 OUTCAR 有 数十万行，频率块在第 文件中段某处 行），
-//! 所以必须流式扫描。
+//! 两段数据都在文件中部（频率块前面可能有几十万行），所以必须流式扫描。
 
 use crate::{HessianMatrix, VibrationReport, VibrationalMode};
 use regex::Regex;
 use std::sync::OnceLock;
 
-/// 频率行：`   1 f  =   十几 THz    87.765876 2PiTHz  465.934755 cm-1    57.768568 meV`
+/// 频率行：`   1 f  =    5.432100 THz    34.132685 2PiTHz  181.222123 cm-1    22.465903 meV`
 ///
 /// 捕获组：序号 / 是否虚频 / THz / 2PiTHz / cm-1 / meV
 fn mode_re() -> &'static Regex {
@@ -147,12 +146,12 @@ mod tests {
     #[test]
     fn parses_real_and_imaginary_modes() {
         let mut s = VibrationScanner::new();
-        s.feed("   1 f  =   十几 THz    87.765876 2PiTHz  465.934755 cm-1    57.768568 meV");
+        s.feed("   1 f  =    5.432100 THz    34.132685 2PiTHz  181.222123 cm-1    22.465903 meV");
         s.feed("  56 f/i=    0.044329 THz     0.278526 2PiTHz    1.478647 cm-1     0.183329 meV");
         let r = s.finish();
         assert_eq!(r.modes.len(), 2);
         assert!(!r.modes[0].is_imaginary);
-        assert!((r.modes[0].frequency_thz - 13.968373).abs() < 1e-9);
+        assert!((r.modes[0].frequency_thz - 5.432100).abs() < 1e-9);
         assert!(r.modes[1].is_imaginary);
         // 虚频取负
         assert!((r.modes[1].frequency_thz + 0.044329).abs() < 1e-9);

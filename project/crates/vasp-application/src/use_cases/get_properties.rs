@@ -1,7 +1,7 @@
 //! SCF 电子步、每原子力/应力、振动（频率 + 力常数）三个用例。
 //!
 //! 它们都读同一个任务目录里的输出文件，放一起便于对照；
-//! 大文件（几百 MB / 几百 MB 的 OUTCAR）走流式扫描，不整读。
+//! 大文件（几百 MB 的 OUTCAR）走流式扫描，不整读。
 
 use crate::ports::{Fs, MAX_FULL_READ};
 use crate::{AppError, AppResult};

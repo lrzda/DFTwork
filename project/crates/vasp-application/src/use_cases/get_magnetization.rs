@@ -5,7 +5,7 @@ use vasp_domain::{MagnetizationReport, MagnetizationScanner};
 
 /// 从任务的 OUTCAR 里提取磁矩（逐离子步的总磁矩）。
 ///
-/// 走流式扫描：`某个大体系` 的 OUTCAR 有 几百 MB、`某 MD 轨迹` 有 几百 MB，
+/// 走流式扫描：单份 OUTCAR 可达几百 MB，
 /// 既不能整读也不能只读尾部（磁矩分布在整个文件里）。
 pub struct GetMagnetization<'a> {
     fs: &'a dyn Fs,

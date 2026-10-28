@@ -14,7 +14,7 @@ use vasp_domain::{AnalysisReport, Incar};
 
 /// 收敛序列只保留首尾若干步。
 ///
-/// 一个 数百步的弛豫任务，全量塞进提示词要几千 token，而这些点对「是否收敛」
+/// 一个几百步的弛豫任务，全量塞进提示词要几千 token，而这些点对「是否收敛」
 /// 的判断贡献几乎为零——首步给出起点，末几步给出收敛趋势，足够了。
 const HEAD_POINTS: usize = 2;
 const TAIL_POINTS: usize = 6;
