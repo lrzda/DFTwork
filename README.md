@@ -1,9 +1,23 @@
 # DFTwork
 
-VASP 计算任务工作台（Windows 桌面软件）。
+> A Windows desktop workbench for inspecting, diagnosing and visualizing VASP calculations.
+> Scans a project folder, tells you what each task is doing, and shows you the numbers.
 
-**当前可运行**：扫描、诊断、可视化、多任务对比已全部实现并有真实数据验证；
-构建输入 / 放行 / 备份回滚（M4）、AI 通道（M3）、打包（M5）尚未开始。
+VASP 计算任务工作台（Windows 桌面软件）。扫描一个项目目录，识别每个任务在算什么、
+算到哪一步、结果怎么样，并把结构、能量、力、频率、轨迹画出来。
+
+**开箱即用**：不需要装 Python / Rust / VASP，下载安装包即可。
+
+## 下载
+
+到 [Releases](https://github.com/lrzda/DFTwork/releases/latest) 下载，两个包任选其一：
+
+| 包 | 适合 |
+|---|---|
+| `DFTwork-x.y.z-x64.exe` | 安装版，可选安装目录，自动建快捷方式，卸载保留设置 |
+| `DFTwork-x.y.z-portable.exe` | 免安装版，双击即用，不写注册表 |
+
+> 首次运行 Windows 会提示「未知发布者」——没有购买代码签名证书，点「更多信息 → 仍要运行」即可。
 
 ## 现在能做什么
 
@@ -17,6 +31,7 @@ VASP 计算任务工作台（Windows 桌面软件）。
 | 总磁矩演化 | `magnetization` | 磁矩曲线 | 逐步演化 |
 | 3D 结构（成键 / PBC / 镜像原子） | `scene` | three.js 看板 | 球棍 + 晶胞 |
 | 多任务对比（INCAR diff + 曲线） | `compare` | 差异表 + 叠加图 | 差异项逐条列出 |
+| **轨迹播放**（XDATCAR） | `trajectory` | 逐帧播放器 | 261 帧 / 73 原子 |
 
 内核 `vaspcore.exe` 的每条命令都输出**恰好一行 JSON**（`{"ok":true,"data":…}`），
 界面里看到的每个数字都来自同一次解析——UI 与 AI 工具共用同一个内核，避免结论漂移。
@@ -55,6 +70,7 @@ node_modules/.pnpm/electron@*/node_modules/electron/dist/electron.exe apps/deskt
   可对选中任务发起分析；未安装时软件功能完整，仅 AI 入口置灰。
 - **数据同源**：UI 与 AI 工具共用 `vaspcore`（Rust 重写，行为对齐 VASPFlow），
   避免「面板说收敛、AI 说不收敛」。
+- **写盘只有一条通路**：AI 只能提案，改动要先看 diff、再放行、写前自动备份、随时可回滚。
 
 ## 内核设计要点
 
@@ -77,6 +93,10 @@ node_modules/.pnpm/electron@*/node_modules/electron/dist/electron.exe apps/deskt
   而不是空数组（空数组会让人误以为「所有原子磁矩为 0」）。
 - **热力学量不做**：Γ 点简谐 ZPE/S/G 理论上 VASP 会输出，但实测体系虚频很多使
   简谐近似无意义，完整振动自由能需 phonopy。
+- **轨迹读 XDATCAR 不读 OUTCAR**：同一个 MD 任务，XDATCAR 0.70 MB，OUTCAR 584 MB；
+  从后者抠 POSITION 块要扫几百 MB 才拿到同样数据。前者 261 帧读完 158 ms。
+- **轨迹播放只改位置、不重建场景**：每帧重建几十个球 + 材质表 + 包围盒，20 fps 下必然卡死。
+  首帧建一次，之后只改 `mesh.position`。播放时也不算键——逐帧按最小镜像判定跟不上帧率。
 
 ## 来源与许可
 
@@ -135,11 +155,12 @@ DFTwork/
 | 里程碑 | 内容 | 状态 |
 |---|---|---|
 | M0 | 工程骨架、Electron 空壳、IPC | ✅ |
-| M1（部分） | Rust 内核：解析 / 判定 / 几何 / 对拍 | ✅ 63 单测 + 对拍全绿 |
+| M1 | Rust 内核：解析 / 判定 / 几何 / 对拍 | ✅ 73 单测 + 对拍全绿 |
 | M2 | 查看器：任务表、统计看板、3D 看板、收敛曲线 | ✅ |
 | M2.5 | SCF / 力 / 应力 / 频率 / 力常数 / 磁矩 / 多任务对比 | ✅ 真实数据验证 |
-| M4 | 构建输入、放行、备份、回滚 | ⬜ 未开始 |
-| M3 | AI 通道 | ⬜ 未开始 |
-| M5 | 打包（NSIS / portable） | ⬜ 未开始 |
+| M3 | AI 通道（只读工具集，无写权限） | ✅ |
+| M4 | 构建输入、放行、备份、回滚 | ✅ |
+| M5 | 打包（NSIS / portable）与首个 release | ✅ |
+| M6 | 轨迹播放（XDATCAR） | ✅ |
 
-测试：`cargo test --workspace` = 63 domain + 2 infrastructure + 1 parity，全绿。
+测试：`cargo test --workspace` = 73 domain + 10 application + 2 infrastructure + 1 parity，全绿。

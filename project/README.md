@@ -74,18 +74,20 @@ Electron 只解析 stdout。所以内核代码里任何 `println!` 都是 bug。
 | domain：状态判定（4 类状态 + 证据） | ✅ 已与真实数据对拍 |
 | domain：任务类型判定（INCAR → 优化/频率/AIMD/SCF/NEB） | ✅ |
 | domain：成键（共价半径 ×1.2 + 最小镜像）、周期/真实双模式 | ✅ 11 项单测 |
-| domain：SCF 电子步 / 磁矩 / 力 / 应力 / 频率 / 力常数 | ✅ 流式，63 项单测 |
+| domain：SCF 电子步 / 磁矩 / 力 / 应力 / 频率 / 力常数 | ✅ 流式，73 项单测 |
 | domain：INCAR diff（多任务对比） | ✅ 4 项单测 |
-| domain：输入校验、构建计划、分析包 | ⬜ `NotImplemented` |
+| domain：输入校验、构建计划、分析包、轨迹解析 | ✅ |
 | application：Scan / Convergence / Scene / Magnetization / Scf / Forces / Vibrations / Compare | ✅ 8 个用例 |
-| application：其余 6 个用例 | ⬜ 骨架 |
+| application：其余 6 个用例（Build / ApplyPlan / Rollback / Analyze / Trajectory 等） | ✅ |
 | infrastructure：LocalFs（GBK 兜底、尾部读取、流式扫描） | ✅ |
 | infrastructure：HermesCli 探测 | ✅ 只探测，不发起会话 |
-| CLI：scan / convergence / scene / magnetization / scf / forces / vibrations / compare / hermes-probe / version | ✅ |
+| CLI：scan / convergence / scene / magnetization / scf / forces / vibrations / compare / trajectory / analyze / build / apply / rollback / hermes-probe / version | ✅ |
 | Electron 主进程 + preload + IPC | ✅ 已启动验证 |
 | 渲染进程：任务表、统计看板、7 个属性标签页 | ✅ |
 | 3D 结构看板（three.js、PBC、成键、镜像原子） | ✅ |
-| 构建 / 放行 / 备份 | ⬜ M4 未做 |
+| 构建 / 放行 / 备份回滚 | ✅ 计划哈希校验 + 内容寻址备份 |
+| 轨迹播放（XDATCAR 逐帧） | ✅ 600 帧上限，超限均匀抽样 |
+| 打包（NSIS / portable） | ✅ 已发布 v0.2.0 |
 
 ## 冒烟测试（无人值守验证界面）
 
