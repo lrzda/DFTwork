@@ -5,15 +5,18 @@
 
 use sha2::{Digest, Sha256};
 
+pub fn content_hash(content: &str) -> String {
+    let mut h = Sha256::new();
+    h.update(content.as_bytes());
+    format!("{:x}", h.finalize())
+}
+
 /// blob 名：内容 sha256 的前 16 位。
 ///
 /// 16 位十六进制 = 64 bit，对单机备份量（万级文件）碰撞概率可忽略；
 /// 取全 64 位会让路径难读，收益也不大。
 pub fn blob_name(content: &str) -> String {
-    let mut h = Sha256::new();
-    h.update(content.as_bytes());
-    let hex = format!("{:x}", h.finalize());
-    hex[..16].to_string()
+    content_hash(content)[..16].to_string()
 }
 
 /// 备份目录名：`<时间戳>-<planHash 前 8 位>`。

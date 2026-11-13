@@ -113,17 +113,63 @@ impl Fs for LocalFs {
         path.exists()
     }
 
+    fn canonicalize(&self, path: &Path) -> AppResult<std::path::PathBuf> {
+        std::fs::canonicalize(path).map_err(|e| AppError::io(path.display().to_string(), e))
+    }
+
+    fn is_symlink(&self, path: &Path) -> bool {
+        std::fs::symlink_metadata(path)
+            .map(|m| m.file_type().is_symlink())
+            .unwrap_or(false)
+    }
+
     fn is_dir(&self, path: &Path) -> bool {
         path.is_dir()
     }
 
     fn write_text(&self, path: &Path, content: &str) -> AppResult<()> {
-        if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent)
-                .map_err(|e| AppError::io(parent.display().to_string(), e))?;
+        use std::io::Write;
+        use std::sync::atomic::{AtomicU64, Ordering};
+
+        static NEXT_TEMP: AtomicU64 = AtomicU64::new(0);
+
+        let parent = path.parent().ok_or_else(|| {
+            AppError::Validation(format!("写入目标没有父目录：{}", path.display()))
+        })?;
+        let file_name = path.file_name().ok_or_else(|| {
+            AppError::Validation(format!("写入目标不是文件：{}", path.display()))
+        })?;
+        std::fs::create_dir_all(parent)
+            .map_err(|e| AppError::io(parent.display().to_string(), e))?;
+
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|duration| duration.as_nanos())
+            .unwrap_or(0);
+        let mut temp_name = std::ffi::OsString::from(".");
+        temp_name.push(file_name);
+        temp_name.push(format!(
+            ".{}.{nanos}.{}.tmp",
+            std::process::id(),
+            NEXT_TEMP.fetch_add(1, Ordering::Relaxed)
+        ));
+        let temp = parent.join(temp_name);
+        let mut created = false;
+        let result = (|| -> std::io::Result<()> {
+            let mut file = std::fs::OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .open(&temp)?;
+            created = true;
+            file.write_all(content.as_bytes())?;
+            file.sync_all()?;
+            drop(file);
+            replace_file(&temp, path)
+        })();
+        if result.is_err() && created {
+            let _ = std::fs::remove_file(&temp);
         }
-        std::fs::write(path, content.as_bytes())
-            .map_err(|e| AppError::io(path.display().to_string(), e))
+        result.map_err(|e| AppError::io(path.display().to_string(), e))
     }
 
     fn remove_file(&self, path: &Path) -> AppResult<()> {
@@ -133,6 +179,38 @@ impl Fs for LocalFs {
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
             Err(e) => Err(AppError::io(path.display().to_string(), e)),
         }
+    }
+
+    fn remove_dir_all(&self, path: &Path) -> AppResult<()> {
+        match std::fs::remove_dir_all(path) {
+            Ok(()) => Ok(()),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+            Err(e) => Err(AppError::io(path.display().to_string(), e)),
+        }
+    }
+}
+
+#[cfg(not(windows))]
+fn replace_file(temp: &Path, target: &Path) -> std::io::Result<()> {
+    std::fs::rename(temp, target)
+}
+
+#[cfg(windows)]
+fn replace_file(temp: &Path, target: &Path) -> std::io::Result<()> {
+    use std::os::windows::ffi::OsStrExt;
+
+    #[link(name = "kernel32")]
+    extern "system" {
+        fn MoveFileExW(existing: *const u16, replacement: *const u16, flags: u32) -> i32;
+    }
+
+    let existing: Vec<u16> = temp.as_os_str().encode_wide().chain(Some(0)).collect();
+    let replacement: Vec<u16> = target.as_os_str().encode_wide().chain(Some(0)).collect();
+    let result = unsafe { MoveFileExW(existing.as_ptr(), replacement.as_ptr(), 0x1 | 0x8) };
+    if result == 0 {
+        Err(std::io::Error::last_os_error())
+    } else {
+        Ok(())
     }
 }
 

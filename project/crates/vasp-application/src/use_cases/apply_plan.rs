@@ -1,19 +1,23 @@
-//! 执行一份已放行的构建计划。
-//!
-//! 这是**全系统唯一的落盘点**。ADR-004 的两阶段：AI/向导产出计划 → 用户看到 diff
-//! 并放行 → 这里才真正写盘。指纹校验保证「用户看到的」和「即将写的」是同一份。
-
+use super::build_store::{BackupManifest, BuildStore, ManifestEntry, WriteJournal};
+use super::path_safety::{business_target_path, reject_duplicates, target_path};
 use crate::ports::{Fs, MAX_FULL_READ};
 use crate::{AppError, AppResult};
-use std::path::{Component, Path};
+use std::path::{Path, PathBuf};
 use vasp_domain::{
-    backup_dir_name, blob_name, blob_rel_path, plan_hash, BuildPlan, BuildReceipt, Clock,
-    RestoreEntry, WriteAction,
+    backup_dir_name, blob_name, blob_rel_path, content_hash, plan_hash, BuildItem, BuildPlan,
+    BuildReceipt, Clock, RestoreEntry, WriteAction,
 };
 
 pub struct ApplyPlan<'a> {
     fs: &'a dyn Fs,
     clock: &'a dyn Clock,
+}
+
+struct Prepared<'a> {
+    item: &'a BuildItem,
+    target: PathBuf,
+    action: WriteAction,
+    previous: Option<String>,
 }
 
 impl<'a> ApplyPlan<'a> {
@@ -22,128 +26,247 @@ impl<'a> ApplyPlan<'a> {
     }
 
     pub fn execute(&self, plan: &BuildPlan) -> AppResult<BuildReceipt> {
-        // 先校验还是先写？必须先校验：一旦开始写，「计划被改过」这件事就无法撤销了
         plan_hash::assert_match(plan).map_err(|_| {
             AppError::Conflict("计划在放行后被改动过（指纹不匹配），已拒绝写入".to_string())
         })?;
+        reject_duplicates(plan.items.iter().map(|item| item.rel_path.as_str()))?;
+        let store = BuildStore::new(self.fs, Path::new(&plan.root))?;
+        store.ensure_no_recovery()?;
+        let root = store.root().to_path_buf();
 
-        // 路径逃逸防护：`..` 或绝对路径能让计划写到项目根之外去
+        let mut prepared = Vec::with_capacity(plan.items.len());
         for item in &plan.items {
-            if !is_safe_rel_path(&item.rel_path) {
-                return Err(AppError::Validation(format!(
-                    "计划里的路径不安全（含 .. 或是绝对路径）：{}",
-                    item.rel_path
-                )));
-            }
+            let target = business_target_path(self.fs, &root, &item.rel_path)?;
+            let (action, previous) = self.preflight(item, &target)?;
+            prepared.push(Prepared {
+                item,
+                target,
+                action,
+                previous,
+            });
         }
 
-        let root = Path::new(&plan.root);
-        let dir = format!("backup/{}", backup_dir_name(&self.clock.now_iso(), &plan.plan_hash));
-
+        let finished_at = self.clock.now_iso();
+        let batch_dir = format!(
+            ".dftwork/backup/{}",
+            backup_dir_name(&finished_at, &plan.plan_hash)
+        );
+        let has_overwrites = prepared
+            .iter()
+            .any(|entry| entry.action == WriteAction::Overwrite);
         let mut written = Vec::new();
         let mut skipped = Vec::new();
         let mut restores = Vec::new();
-        let mut any_backup = false;
-
-        for item in &plan.items {
-            let target = root.join(&item.rel_path);
-
-            // 计划是生成时的快照，而磁盘可能在这之后变了（用户手动建了文件、
-            // 另一个进程写了东西、上次 apply 没回滚干净）。
-            // 所以执行时必须重新判定，并且**只允许**写用户批准过的那种情形：
-            //   plan=create  + 目标已存在且内容不同 → 拒绝（用户没批准覆盖）
-            //   plan=skip    + 目标已变           → 拒绝（用户以为不用动）
-            //   plan=overwrite + 目标消失          → 当 create 处理（无害）
-            let actual = if !self.fs.exists(&target) {
-                WriteAction::Create
-            } else {
-                let old = self.fs.read_text(&target, MAX_FULL_READ)?;
-                if old == item.content {
-                    WriteAction::Skip
-                } else {
-                    match item.action {
-                        WriteAction::Overwrite => WriteAction::Overwrite,
-                        _ => {
-                            return Err(AppError::Conflict(format!(
-                                "{} 在放行后被创建或改动，原计划是「{}」，拒绝覆盖。请重新生成计划。",
-                                item.rel_path,
-                                match item.action {
-                                    WriteAction::Create => "新建",
-                                    WriteAction::Skip => "不动",
-                                    WriteAction::Overwrite => "覆盖",
-                                }
-                            )))
-                        }
-                    }
-                }
-            };
-
-            match actual {
-                WriteAction::Skip => {
-                    skipped.push(item.rel_path.clone());
-                    continue;
-                }
-                WriteAction::Overwrite => {
-                    // 覆盖前必须把原内容存下来，否则回滚无从谈起
-                    let old = self.fs.read_text(&target, MAX_FULL_READ)?;
-                    let blob = blob_name(&old);
-                    self.fs
-                        .write_text(&root.join(blob_rel_path(&dir, &blob)), &old)?;
-                    restores.push(RestoreEntry {
-                        rel_path: item.rel_path.clone(),
-                        blob: Some(blob),
-                    });
-                    any_backup = true;
-                }
-                WriteAction::Create => {
-                    // 原来没有这个文件，回滚时删掉即可
-                    restores.push(RestoreEntry {
-                        rel_path: item.rel_path.clone(),
-                        blob: None,
-                    });
-                }
+        let mut manifest_entries = Vec::new();
+        for entry in &prepared {
+            if entry.action == WriteAction::Skip {
+                skipped.push(entry.item.rel_path.clone());
+                continue;
             }
-
-            self.fs.write_text(&target, &item.content)?;
-            written.push(item.rel_path.clone());
+            written.push(entry.item.rel_path.clone());
+            let blob = (entry.action == WriteAction::Overwrite).then(|| {
+                blob_name(
+                    entry
+                        .previous
+                        .as_deref()
+                        .expect("覆盖项预检时已保存原内容"),
+                )
+            });
+            let applied_hash = content_hash(&entry.item.content);
+            manifest_entries.push(ManifestEntry {
+                rel_path: entry.item.rel_path.clone(),
+                action: entry.action,
+                blob: blob.clone(),
+                applied_hash: applied_hash.clone(),
+            });
+            restores.push(RestoreEntry {
+                rel_path: entry.item.rel_path.clone(),
+                blob,
+                applied_hash: Some(applied_hash),
+            });
         }
-
-        Ok(BuildReceipt {
+        let receipt = BuildReceipt {
             root: plan.root.clone(),
             plan_hash: plan.plan_hash.clone(),
             written,
             skipped,
-            backup_dir: any_backup.then_some(dir),
+            backup_dir: has_overwrites.then_some(batch_dir.clone()),
             restores,
-            finished_at: self.clock.now_iso(),
-        })
+            finished_at: finished_at.clone(),
+        };
+        let manifest = BackupManifest {
+            schema_version: 1,
+            root: plan.root.clone(),
+            plan_hash: plan.plan_hash.clone(),
+            created_at: finished_at,
+            entries: manifest_entries,
+        };
+        let journal = WriteJournal {
+            schema_version: 1,
+            batch_dir: batch_dir.clone(),
+            plan: plan.clone(),
+            receipt: receipt.clone(),
+        };
+
+        store.save_pending(plan)?;
+        for entry in prepared
+            .iter()
+            .filter(|entry| entry.action == WriteAction::Overwrite)
+        {
+            let old = entry.previous.as_deref().ok_or_else(|| {
+                AppError::Validation(format!("{} 缺少写入前像", entry.item.rel_path))
+            })?;
+            let blob = blob_name(old);
+            let backup = target_path(self.fs, &root, &blob_rel_path(&batch_dir, &blob))?;
+            self.fs.write_text(&backup, old)?;
+        }
+        store.write_manifest(&batch_dir, &manifest)?;
+        store.write_journal(&journal)?;
+        failpoint("after-backup");
+
+        let mut completed = Vec::new();
+        for (index, entry) in prepared.iter().enumerate() {
+            if entry.action == WriteAction::Skip {
+                continue;
+            }
+            if let Err(error) = self.write_entry(&root, entry) {
+                let compensation_errors = self.compensate(&prepared, &completed);
+                if compensation_errors.is_empty() {
+                    store.remove_journal(&batch_dir)?;
+                    return Err(error);
+                }
+                return Err(AppError::External(format!(
+                    "{}；补偿已写入项时仍失败：{}。恢复日志已保留，请执行恢复",
+                    error.message(),
+                    compensation_errors.join("；")
+                )));
+            }
+            completed.push(index);
+            if completed.len() == 1 {
+                failpoint("after-first-write");
+            }
+        }
+
+        failpoint("before-receipt");
+        store.commit_receipt(&receipt).map_err(|error| {
+            AppError::External(format!(
+                "业务文件已写入，但回执提交失败：{}。恢复日志已保留，请执行恢复",
+                error.message()
+            ))
+        })?;
+        failpoint("after-receipt");
+        store.remove_journal(&batch_dir)?;
+        store.clear_pending(&plan.plan_hash)?;
+        store.enforce_retention(&self.clock.now_iso())?;
+        Ok(receipt)
+    }
+
+    fn preflight(&self, item: &BuildItem, target: &Path) -> AppResult<(WriteAction, Option<String>)> {
+        let current = if self.fs.exists(target) {
+            Some(self.fs.read_text(target, MAX_FULL_READ)?)
+        } else {
+            None
+        };
+
+        if current.as_deref() == Some(item.content.as_str()) {
+            return Ok((WriteAction::Skip, current));
+        }
+
+        match (item.action, current) {
+            (WriteAction::Create, None) => {
+                if item.previous_content.is_some() {
+                    return Err(AppError::Validation(format!(
+                        "{} 是新建项，却带有写入前像",
+                        item.rel_path
+                    )));
+                }
+                Ok((WriteAction::Create, None))
+            }
+            (WriteAction::Create, Some(_)) => Err(AppError::Conflict(format!(
+                "{} 在放行后被创建或改动，原计划是新建，已拒绝覆盖",
+                item.rel_path
+            ))),
+            (WriteAction::Overwrite, Some(old)) => {
+                if item.previous_content.as_deref() != Some(old.as_str()) {
+                    return Err(AppError::Conflict(format!(
+                        "{} 在放行后被创建或改动，原计划是覆盖，请重新生成计划",
+                        item.rel_path
+                    )));
+                }
+                Ok((WriteAction::Overwrite, Some(old)))
+            }
+            (WriteAction::Overwrite, None) => Err(AppError::Conflict(format!(
+                "{} 在放行后被删除，原计划是覆盖，请重新生成计划",
+                item.rel_path
+            ))),
+            (WriteAction::Skip, Some(old)) => {
+                if item.previous_content.as_deref() != Some(old.as_str()) {
+                    return Err(AppError::Conflict(format!(
+                        "{} 在放行后被改动，原计划是不动，已拒绝继续",
+                        item.rel_path
+                    )));
+                }
+                Ok((WriteAction::Skip, Some(old)))
+            }
+            (WriteAction::Skip, None) => Err(AppError::Conflict(format!(
+                "{} 在放行后被删除，原计划是不动，已拒绝继续",
+                item.rel_path
+            ))),
+        }
+    }
+
+    fn write_entry(&self, root: &Path, entry: &Prepared<'_>) -> AppResult<()> {
+        business_target_path(self.fs, root, &entry.item.rel_path)?;
+        match entry.action {
+            WriteAction::Create => {
+                if self.fs.exists(&entry.target) {
+                    return Err(AppError::Conflict(format!(
+                        "{} 在写入前被创建，已停止本批次",
+                        entry.item.rel_path
+                    )));
+                }
+            }
+            WriteAction::Overwrite => {
+                let current = self.fs.read_text(&entry.target, MAX_FULL_READ)?;
+                if Some(current.as_str()) != entry.previous.as_deref() {
+                    return Err(AppError::Conflict(format!(
+                        "{} 在写入前发生变化，已停止本批次",
+                        entry.item.rel_path
+                    )));
+                }
+            }
+            WriteAction::Skip => return Ok(()),
+        }
+        self.fs.write_text(&entry.target, &entry.item.content)
+    }
+
+    fn compensate(&self, prepared: &[Prepared<'_>], completed: &[usize]) -> Vec<String> {
+        let mut errors = Vec::new();
+        for &index in completed.iter().rev() {
+            let entry = &prepared[index];
+            let result = match entry.action {
+                WriteAction::Create => self.fs.remove_file(&entry.target),
+                WriteAction::Overwrite => self.fs.write_text(
+                    &entry.target,
+                    entry
+                        .previous
+                        .as_deref()
+                        .expect("覆盖项补偿需要原内容"),
+                ),
+                WriteAction::Skip => continue,
+            };
+            if let Err(error) = result {
+                errors.push(format!("{}: {}", entry.item.rel_path, error.message()));
+            }
+        }
+        errors
     }
 }
 
-/// 相对路径必须是「纯普通段」：不能是绝对路径，也不能有 `..` / `.` / 盘符前缀。
-///
-/// 光看 `starts_with(root)` 不够——`root/../etc/passwd` 在拼接前就逃逸了，
-/// 而先拼接再规范化又把「写到哪」变成了运行时才知道的事。
-fn is_safe_rel_path(rel: &str) -> bool {
-    if rel.is_empty() {
-        return false;
-    }
-    let p = Path::new(rel);
-    !p.is_absolute() && p.components().all(|c| matches!(c, Component::Normal(_)))
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn rejects_escape_paths() {
-        assert!(is_safe_rel_path("task-1/INCAR"));
-        assert!(is_safe_rel_path("INCAR"));
-        assert!(!is_safe_rel_path("../outside/INCAR"));
-        assert!(!is_safe_rel_path("a/../../b"));
-        assert!(!is_safe_rel_path("C:/Windows/system32/x"));
-        assert!(!is_safe_rel_path("/etc/passwd"));
-        assert!(!is_safe_rel_path(""));
+fn failpoint(stage: &str) {
+    if cfg!(debug_assertions)
+        && std::env::var("DFTWORK_TEST_FAILPOINT").ok().as_deref() == Some(stage)
+    {
+        std::process::exit(97);
     }
 }
