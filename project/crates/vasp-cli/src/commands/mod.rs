@@ -4,7 +4,8 @@ use vasp_infrastructure::{HermesCli, HermesRunner, LocalFs};
 use vasp_application::{
     GetTrajectory,
     AnalyzeTask, ApplyPlan, BuildInputs, BuildRequest, CompareTasks, GetConvergence, GetForces, GetMagnetization, GetScf, GetStructureScene,
-    GetVibrations, Rollback, ScanProject,
+    GetVibrations, GetProjectState, PruneBackups, RecoverInterrupted, Rollback, ScanProject,
+    BuildStore,
 };
 
 use crate::support::SystemClock;
@@ -147,6 +148,7 @@ pub fn build(
         files: files.to_vec(),
     };
     let plan = BuildInputs::new(&fs, &clock).execute(&req)?;
+    BuildStore::new(&fs, Path::new(&plan.root))?.save_pending(&plan)?;
     emit(&serde_json::json!({ "ok": true, "data": plan }))
 }
 
@@ -175,6 +177,82 @@ pub fn rollback(receipt_path: &str) -> anyhow::Result<()> {
     emit(&serde_json::json!({ "ok": true, "data": report }))
 }
 
+pub fn project_state(root: &str) -> anyhow::Result<()> {
+    let fs = LocalFs::new();
+    let state = GetProjectState::new(&fs).execute(Path::new(root))?;
+    emit(&serde_json::json!({ "ok": true, "data": state }))
+}
+
+pub fn discard_plan(root: &str) -> anyhow::Result<()> {
+    let fs = LocalFs::new();
+    BuildStore::new(&fs, Path::new(root))?.discard_pending()?;
+    emit(&serde_json::json!({ "ok": true, "data": { "discarded": true } }))
+}
+
+pub fn recover(root: &str) -> anyhow::Result<()> {
+    let fs = LocalFs::new();
+    let clock = SystemClock;
+    let report = RecoverInterrupted::new(&fs, &clock).execute(Path::new(root))?;
+    emit(&serde_json::json!({ "ok": true, "data": report }))
+}
+
+pub fn prune_backups(root: &str) -> anyhow::Result<()> {
+    let fs = LocalFs::new();
+    let clock = SystemClock;
+    let report = PruneBackups::new(&fs, &clock).execute(Path::new(root))?;
+    emit(&serde_json::json!({ "ok": true, "data": report }))
+}
+
+fn resolve_hermes_bin(hermes_bin: Option<&str>) -> String {
+    let configured = hermes_bin
+        .map(|s| s.to_string())
+        .or_else(|| std::env::var("HERMES_BIN").ok())
+        .unwrap_or_else(|| "hermes".to_string());
+    let path = Path::new(&configured);
+    if path.is_absolute() || path.components().count() != 1 {
+        return configured;
+    }
+    let Some(search_path) = std::env::var_os("PATH") else {
+        return configured;
+    };
+    for directory in std::env::split_paths(&search_path) {
+        let direct = directory.join(&configured);
+        if direct.is_file() {
+            return direct.to_string_lossy().into_owned();
+        }
+        #[cfg(windows)]
+        for extension in ["exe", "cmd", "bat"] {
+            let candidate = directory.join(format!("{configured}.{extension}"));
+            if candidate.is_file() {
+                return candidate.to_string_lossy().into_owned();
+            }
+        }
+    }
+    configured
+}
+
+fn hermes_runner(
+    model: Option<&str>,
+    provider: Option<&str>,
+    hermes_bin: Option<&str>,
+    max_turns: u32,
+    timeout: u64,
+) -> vasp_application::AppResult<HermesRunner> {
+    let model = model
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .ok_or_else(|| vasp_application::AppError::Validation("Hermes 需要显式指定模型".into()))?;
+    let provider = provider
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .ok_or_else(|| vasp_application::AppError::Validation("Hermes 需要显式指定提供方".into()))?;
+    Ok(HermesRunner::new(resolve_hermes_bin(hermes_bin))
+        .with_model(Some(model.to_string()))
+        .with_provider(Some(provider.to_string()))
+        .with_max_turns(max_turns)
+        .with_timeout(timeout))
+}
+
 pub fn analyze(
     task: &str,
     model: Option<&str>,
@@ -184,21 +262,33 @@ pub fn analyze(
     timeout: u64,
 ) -> anyhow::Result<()> {
     let fs = LocalFs::new();
-    let bin = hermes_bin
-        .map(|s| s.to_string())
-        .or_else(|| std::env::var("HERMES_BIN").ok())
-        .unwrap_or_else(|| "hermes".to_string());
-    let runner = HermesRunner::new(bin)
-        .with_model(model.map(|s| s.to_string()))
-        .with_provider(provider.map(|s| s.to_string()))
-        .with_max_turns(max_turns)
-        .with_timeout(timeout);
+    let runner = hermes_runner(model, provider, hermes_bin, max_turns, timeout)?;
     let report = AnalyzeTask::new(&fs, &runner).execute(std::path::Path::new(task))?;
     emit(&serde_json::json!({ "ok": true, "data": report }))
 }
 
-pub fn hermes_probe() -> anyhow::Result<()> {
-    let cap = HermesCli::from_path().probe();
+pub fn hermes_chat(
+    root: &str,
+    prompt_file: &str,
+    model: Option<&str>,
+    provider: Option<&str>,
+    hermes_bin: Option<&str>,
+    resume: Option<&str>,
+    max_turns: u32,
+    timeout: u64,
+) -> anyhow::Result<()> {
+    let fs = LocalFs::new();
+    let prompt = fs.read_text(Path::new(prompt_file), 128 * 1024)?;
+    if prompt.trim().is_empty() {
+        return Err(vasp_application::AppError::Validation("对话消息不能为空".into()).into());
+    }
+    let runner = hermes_runner(model, provider, hermes_bin, max_turns, timeout)?;
+    let report = runner.run_chat(&prompt, Path::new(root), resume)?;
+    emit(&serde_json::json!({ "ok": true, "data": report }))
+}
+
+pub fn hermes_probe(hermes_bin: Option<&str>) -> anyhow::Result<()> {
+    let cap = HermesCli::new(resolve_hermes_bin(hermes_bin)).probe();
     emit(&serde_json::json!({ "ok": true, "data": cap }))
 }
 

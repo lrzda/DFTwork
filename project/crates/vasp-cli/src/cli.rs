@@ -76,7 +76,7 @@ pub enum Commands {
         tasks: Vec<String>,
     },
 
-    /// 以某个任务为模板生成一份输入计划（只产出计划，不落盘）。
+    /// 以某个任务为模板生成输入计划（只保存 pending，不修改业务文件）。
     Build {
         /// 源任务目录（绝对路径，或相对 --root）。
         source: String,
@@ -105,6 +105,26 @@ pub enum Commands {
         receipt: String,
     },
 
+    /// 找回当前项目的 pending 计划、回执和未完成写入。
+    ProjectState {
+        root: String,
+    },
+
+    /// 丢弃当前 pending 计划，不修改业务文件。
+    DiscardPlan {
+        root: String,
+    },
+
+    /// 恢复一次中断的写入；未提交则回滚，已提交则补完清理。
+    Recover {
+        root: String,
+    },
+
+    /// 立即执行备份保留策略，并标记失去备份的回执。
+    PruneBackups {
+        root: String,
+    },
+
     /// 让 AI 分析一个任务（需要本机装有 Hermes；没有也能用其他功能）。
     Analyze {
         /// 任务目录。
@@ -115,7 +135,7 @@ pub enum Commands {
         /// 提供方（deepseek / openrouter / anthropic …）。
         #[arg(long)]
         provider: Option<String>,
-        /// hermes 可执行文件路径；缺省用 PATH 里的 hermes。
+        /// hermes 可执行文件路径；缺省使用 HERMES_BIN 或 PATH。
         #[arg(long)]
         hermes_bin: Option<String>,
         #[arg(long, default_value_t = 2)]
@@ -125,8 +145,34 @@ pub enum Commands {
         timeout: u64,
     },
 
+    /// 在项目根目录中与 Hermes 对话；消息通过 UTF-8 文本文件传入。
+    HermesChat {
+        /// 当前扫描项目根目录，同时作为 Hermes 子进程 cwd。
+        root: String,
+        /// 用户消息文件路径。
+        prompt_file: String,
+        #[arg(long)]
+        model: Option<String>,
+        #[arg(long)]
+        provider: Option<String>,
+        /// hermes 可执行文件路径；缺省使用 HERMES_BIN 或 PATH。
+        #[arg(long)]
+        hermes_bin: Option<String>,
+        /// 上次回答返回的 Hermes session_id。
+        #[arg(long)]
+        resume: Option<String>,
+        #[arg(long, default_value_t = 2)]
+        max_turns: u32,
+        #[arg(long, default_value_t = 180)]
+        timeout: u64,
+    },
+
     /// 探测 Hermes 是否可用（缺席是正常状态）。
-    HermesProbe,
+    HermesProbe {
+        /// hermes 可执行文件路径；缺省使用 HERMES_BIN 或 PATH。
+        #[arg(long)]
+        hermes_bin: Option<String>,
+    },
 
     /// 打印版本与构建信息。
     Version,

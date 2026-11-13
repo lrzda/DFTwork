@@ -19,7 +19,12 @@ export const IPC = {
   build: "core:build",
   apply: "core:apply",
   rollback: "core:rollback",
+  projectState: "core:project-state",
+  discardPlan: "core:discard-plan",
+  recover: "core:recover",
+  pruneBackups: "core:prune-backups",
   analyze: "core:analyze",
+  hermesChat: "core:hermes-chat",
   trajectory: "core:trajectory",
 } as const;
 
@@ -54,6 +59,15 @@ export interface TrajectoryRequest {
 export interface AnalyzeRequest {
   taskAbsPath: string;
   /** `--ignore-user-config` 下必须显式给模型。 */
+  model?: string;
+  provider?: string;
+  maxTurns?: number;
+}
+
+export interface HermesChatRequest {
+  root: string;
+  message: string;
+  sessionId?: string;
   model?: string;
   provider?: string;
   maxTurns?: number;
@@ -115,6 +129,11 @@ export interface DftworkApi {
   build(req: BuildRequest): Promise<Envelope<import("./dto").BuildPlan>>;
   apply(req: ApplyRequest): Promise<Envelope<import("./dto").BuildReceipt>>;
   rollback(req: RollbackRequest): Promise<Envelope<import("./dto").RollbackReport>>;
+  projectState(req: { root: string }): Promise<Envelope<import("./dto").BuildState>>;
+  discardPlan(req: { root: string }): Promise<Envelope<{ discarded: boolean }>>;
+  recover(req: { root: string }): Promise<Envelope<import("./dto").RecoveryReport>>;
+  pruneBackups(req: { root: string }): Promise<Envelope<import("./dto").RetentionReport>>;
   analyze(req: AnalyzeRequest): Promise<Envelope<import("./dto").AnalysisReport>>;
+  hermesChat(req: HermesChatRequest): Promise<Envelope<import("./dto").AnalysisReport>>;
   trajectory(req: TrajectoryRequest): Promise<Envelope<import("./dto").TrajectoryReport>>;
 }

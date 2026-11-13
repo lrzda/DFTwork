@@ -3,14 +3,14 @@
 //! 实测事实（见 `docs/m3-probe-findings.md`，v0.22.5）：
 //! - stdout 是纯 JSONL；`Session:` 只在 stderr
 //! - `text` 事件是 **token 级片段**，必须拼接
-//! - 成功判据是 `result.exit_code`，不是进程退出码
-//! - `--run-budget` 不被支持，超时只能由我们 kill 子进程
+//! - 同时检查 `result.exit_code` 与进程退出状态，任一失败都不能显示为成功
+//! - 非空 stdout 行必须是 JSONL；超时由宿主结束 Windows 进程树
 //! - 必须显式传一个无害 toolset：`-t ''` 会回落到默认工具集（含 terminal）
 
 use serde_json::Value;
 use std::io::{BufRead, BufReader};
 use std::path::PathBuf;
-use std::process::{Command, Stdio};
+use std::process::{Child, Command, Stdio};
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
 use vasp_application::ports::Analyzer;
@@ -67,8 +67,37 @@ impl HermesRunner {
 
     /// 问一次。提示词走文件（避免引号、反斜杠、命令行长度限制）。
     pub fn run(&self, prompt: &str) -> AppResult<AnalysisReport> {
+        self.run_prompt(prompt, None, None)
+    }
+
+    pub fn run_chat(
+        &self,
+        prompt: &str,
+        root: &std::path::Path,
+        resume: Option<&str>,
+    ) -> AppResult<AnalysisReport> {
+        if resume.is_some_and(|session| session.trim().is_empty()) {
+            return Err(AppError::Validation("会话 ID 不能为空".into()));
+        }
+        if !root.exists() {
+            return Err(AppError::NotFound(format!("项目根不存在：{}", root.display())));
+        }
+        let cwd = std::fs::canonicalize(root)
+            .map_err(|e| AppError::io(root.display().to_string(), e))?;
+        if !cwd.is_dir() {
+            return Err(AppError::Validation(format!("项目根不是目录：{}", root.display())));
+        }
+        self.run_prompt(prompt, Some(&cwd), resume)
+    }
+
+    fn run_prompt(
+        &self,
+        prompt: &str,
+        cwd: Option<&std::path::Path>,
+        resume: Option<&str>,
+    ) -> AppResult<AnalysisReport> {
         let prompt_file = self.write_prompt(prompt)?;
-        let result = self.run_with(&prompt_file);
+        let result = self.run_with(&prompt_file, cwd, resume);
         let _ = std::fs::remove_file(&prompt_file);
         result
     }
@@ -85,7 +114,12 @@ impl HermesRunner {
         Ok(path)
     }
 
-    fn run_with(&self, prompt_file: &std::path::Path) -> AppResult<AnalysisReport> {
+    fn run_with(
+        &self,
+        prompt_file: &std::path::Path,
+        cwd: Option<&std::path::Path>,
+        resume: Option<&str>,
+    ) -> AppResult<AnalysisReport> {
         let mut cmd = Command::new(&self.bin);
         cmd.arg("chat")
             .arg("--query-file")
@@ -97,8 +131,6 @@ impl HermesRunner {
             .arg("--quiet")
             .arg("--max-turns")
             .arg(self.max_turns.to_string())
-            // 隔离用户的 persona / skills / memory：实测不隔离时 AI 会自称
-            // 用户的 SOUL.md 人格，产物带人设语气且多耗 token
             .arg("--ignore-user-config")
             .arg("--ignore-rules")
             .arg("-t")
@@ -109,7 +141,12 @@ impl HermesRunner {
             .env("PYTHONUTF8", "1")
             .env("PYTHONIOENCODING", "utf-8");
 
-        // --ignore-user-config 读不到 profile 默认模型，必须显式给
+        if let Some(cwd) = cwd {
+            cmd.current_dir(cwd);
+        }
+        if let Some(session) = resume {
+            cmd.arg("--resume").arg(session);
+        }
         if let Some(m) = &self.model {
             cmd.arg("--model").arg(m);
         }
@@ -146,11 +183,11 @@ impl HermesRunner {
         let mut result_text = String::new();
         let mut lines = 0usize;
         let mut timed_out = false;
+        let mut stream_error = None;
 
         loop {
             let remaining = self.timeout.saturating_sub(started.elapsed());
             if remaining.is_zero() {
-                let _ = child.kill();
                 timed_out = true;
                 break;
             }
@@ -162,8 +199,14 @@ impl HermesRunner {
                         continue;
                     }
                     lines += 1;
-                    let Ok(v) = serde_json::from_str::<Value>(line) else {
-                        continue; // 非 JSON 行不该出现，但出现了也不要崩
+                    let v = match serde_json::from_str::<Value>(line) {
+                        Ok(v) => v,
+                        Err(e) => {
+                            stream_error = Some(format!(
+                                "Hermes stdout 第 {lines} 行不是有效 JSONL：{e}"
+                            ));
+                            break;
+                        }
                     };
                     match v.get("type").and_then(Value::as_str) {
                         Some("text") => {
@@ -229,7 +272,6 @@ impl HermesRunner {
                     }
                 }
                 Err(mpsc::RecvTimeoutError::Timeout) => {
-                    let _ = child.kill();
                     timed_out = true;
                     break;
                 }
@@ -237,11 +279,26 @@ impl HermesRunner {
             }
         }
 
-        let _ = child.wait();
+        if timed_out || stream_error.is_some() {
+            terminate(&mut child);
+        }
+        let status = child
+            .wait()
+            .map_err(|e| AppError::External(format!("等待 Hermes 子进程退出失败：{e}")))?;
+        if let Some(error) = stream_error {
+            return Err(AppError::External(error));
+        }
 
         // 拿不到 result 事件时（被 kill、崩溃、协议变更），用已拼好的 text 兜底，
         // exit_code 记 -1 让上层知道「这次不算成功」
-        let exit_code = exit_code.unwrap_or(-1);
+        let mut exit_code = exit_code.unwrap_or(-1);
+        if timed_out || !status.success() {
+            exit_code = if timed_out {
+                -1
+            } else {
+                status.code().unwrap_or(-1)
+            };
+        }
         if text.is_empty() && !result_text.is_empty() {
             text = result_text;
         }
@@ -256,6 +313,27 @@ impl HermesRunner {
             tool_calls,
             timed_out,
         })
+    }
+}
+
+fn terminate(child: &mut Child) {
+    #[cfg(windows)]
+    {
+        // 结束 .cmd / launcher 及其模型子进程，不能让它们继续持有 stdout 或消耗额度。
+        let terminated = Command::new("taskkill")
+            .args(["/PID", &child.id().to_string(), "/T", "/F"])
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status()
+            .is_ok_and(|status| status.success());
+        if !terminated {
+            let _ = child.kill();
+        }
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = child.kill();
     }
 }
 
