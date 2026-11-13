@@ -3,6 +3,9 @@ import type {
   TrajectoryReport,
   BuildPlan,
   BuildReceipt,
+  BuildState,
+  RecoveryReport,
+  RetentionReport,
   CompareReport,
   ConvergenceSeries,
   DftworkApi,
@@ -86,6 +89,13 @@ export const api = {
   apply: (plan: BuildPlan): Promise<BuildReceipt> => unwrap(bridge().apply({ plan })),
   rollback: (receipt: BuildReceipt): Promise<RollbackReport> =>
     unwrap(bridge().rollback({ receipt })),
+  projectState: (root: string): Promise<BuildState> =>
+    unwrap(bridge().projectState({ root })),
+  discardPlan: (root: string): Promise<{ discarded: boolean }> =>
+    unwrap(bridge().discardPlan({ root })),
+  recover: (root: string): Promise<RecoveryReport> => unwrap(bridge().recover({ root })),
+  pruneBackups: (root: string): Promise<RetentionReport> =>
+    unwrap(bridge().pruneBackups({ root })),
   analyze: (
     taskAbsPath: string,
     model?: string,
@@ -93,6 +103,15 @@ export const api = {
     maxTurns?: number,
   ): Promise<AnalysisReport> =>
     unwrap(bridge().analyze({ taskAbsPath, model, provider, maxTurns })),
+  hermesChat: (
+    root: string,
+    message: string,
+    sessionId?: string,
+    model?: string,
+    provider?: string,
+    maxTurns?: number,
+  ): Promise<AnalysisReport> =>
+    unwrap(bridge().hermesChat({ root, message, sessionId, model, provider, maxTurns })),
   trajectory: (taskAbsPath: string): Promise<TrajectoryReport> =>
     unwrap(bridge().trajectory({ taskAbsPath })),
 };

@@ -110,22 +110,39 @@ function createWindow(): void {
   }
 }
 
-app.whenReady().then(() => {
-  // 内核 spawn `hermes` 时继承这个变量。终端里能跑 `hermes` 是 shell 加了 PATH，
-  // Electron 继承的是系统 PATH——两者不同，不解析就 ENOENT。
-  if (!process.env.HERMES_BIN) {
-    process.env.HERMES_BIN = resolveHermes();
-    console.info(`[dftwork] HERMES_BIN = ${process.env.HERMES_BIN}`);
-  }
-  // 启动时打一行内核路径，排查「找不到 exe」时第一时间能看见
-  console.info(`[dftwork] core = ${coreBinary()}`);
-  registerIpc();
-  createWindow();
+const hasSingleInstanceLock = app.requestSingleInstanceLock();
 
-  app.on("activate", () => {
-    if (BrowserWindow.getAllWindows().length === 0) createWindow();
+if (!hasSingleInstanceLock) {
+  app.quit();
+} else {
+  app.on("second-instance", () => {
+    const win = BrowserWindow.getAllWindows()[0];
+    if (!win) {
+      if (app.isReady()) createWindow();
+      return;
+    }
+    if (win.isMinimized()) win.restore();
+    win.show();
+    win.focus();
   });
-});
+
+  app.whenReady().then(() => {
+    // 内核 spawn `hermes` 时继承这个变量。终端里能跑 `hermes` 是 shell 加了 PATH，
+    // Electron 继承的是系统 PATH——两者不同，不解析就 ENOENT。
+    if (!process.env.HERMES_BIN) {
+      process.env.HERMES_BIN = resolveHermes();
+      console.info(`[dftwork] HERMES_BIN = ${process.env.HERMES_BIN}`);
+    }
+    // 启动时打一行内核路径，排查「找不到 exe」时第一时间能看见
+    console.info(`[dftwork] core = ${coreBinary()}`);
+    registerIpc();
+    createWindow();
+
+    app.on("activate", () => {
+      if (BrowserWindow.getAllWindows().length === 0) createWindow();
+    });
+  });
+}
 
 app.on("window-all-closed", () => {
   if (process.platform !== "darwin") app.quit();

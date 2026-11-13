@@ -20,7 +20,12 @@ const api: DftworkApi = {
   build: (req) => ipcRenderer.invoke(IPC.build, req),
   apply: (req) => ipcRenderer.invoke(IPC.apply, req),
   rollback: (req) => ipcRenderer.invoke(IPC.rollback, req),
+  projectState: (req) => ipcRenderer.invoke(IPC.projectState, req),
+  discardPlan: (req) => ipcRenderer.invoke(IPC.discardPlan, req),
+  recover: (req) => ipcRenderer.invoke(IPC.recover, req),
+  pruneBackups: (req) => ipcRenderer.invoke(IPC.pruneBackups, req),
   analyze: (req) => ipcRenderer.invoke(IPC.analyze, req),
+  hermesChat: (req) => ipcRenderer.invoke(IPC.hermesChat, req),
   trajectory: (req) => ipcRenderer.invoke(IPC.trajectory, req),
 };
 

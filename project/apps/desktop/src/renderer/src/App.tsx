@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   Alert,
   Button,
@@ -26,6 +26,9 @@ import {
 import type {
   BuildPlan,
   BuildReceipt,
+  BuildState,
+  ReceiptRecord,
+  RecoveryNotice,
   CompareReport,
   ConvergenceSeries,
   ForcesResponse,
@@ -118,9 +121,13 @@ export default function App(): JSX.Element {
   /** 左侧表格里勾选的任务（rel_path），用于多任务对比。 */
   const [checked, setChecked] = useState<string[]>([]);
   const [compareData, setCompareData] = useState<CompareReport | null>(null);
+  const [compareLoading, setCompareLoading] = useState(false);
   // 构建与放行
   const [plan, setPlan] = useState<BuildPlan | null>(null);
   const [receipt, setReceipt] = useState<BuildReceipt | null>(null);
+  const [receipts, setReceipts] = useState<ReceiptRecord[]>([]);
+  const [recovery, setRecovery] = useState<RecoveryNotice | null>(null);
+  const [backupBytes, setBackupBytes] = useState(0);
   const [rollbackReport, setRollbackReport] = useState<RollbackReport | null>(null);
   const [buildOpen, setBuildOpen] = useState(false);
   const [buildBusy, setBuildBusy] = useState(false);
@@ -129,6 +136,32 @@ export default function App(): JSX.Element {
   const [error, setError] = useState<string | null>(null);
   const [ver, setVer] = useState<VersionInfo | null>(null);
   const [hermes, setHermes] = useState<HermesCapability | null>(null);
+  const scanRequestRef = useRef(0);
+  const sceneRequestRef = useRef(0);
+  const convergenceRequestRef = useRef(0);
+  const compareRequestRef = useRef(0);
+
+  const applyBuildState = useCallback((next: BuildState) => {
+    setPlan(next.pending);
+    setReceipts(next.receipts);
+    setRecovery(next.recovery);
+    setBackupBytes(next.backup_bytes);
+    if (next.pending) {
+      setReceipt(null);
+      setRollbackReport(null);
+    }
+  }, []);
+
+  const refreshBuildState = useCallback(
+    async (projectRoot: string): Promise<BuildState | null> => {
+      const request = scanRequestRef.current;
+      const next = await api.projectState(projectRoot);
+      if (request !== scanRequestRef.current) return null;
+      applyBuildState(next);
+      return next;
+    },
+    [applyBuildState],
+  );
 
   useEffect(() => {
     api
@@ -147,19 +180,51 @@ export default function App(): JSX.Element {
       setError("先填项目根目录");
       return;
     }
+    const request = ++scanRequestRef.current;
+    sceneRequestRef.current += 1;
+    convergenceRequestRef.current += 1;
+    compareRequestRef.current += 1;
     setScanning(true);
     setError(null);
     setSelected(null);
     setSeries(null);
+    setScene(null);
+    setSceneError(null);
+    setSceneLoading(false);
+    setScfData(null);
+    setForceData(null);
+    setVibData(null);
+    setMagData(null);
+    setPanelLoading(null);
+    setChecked([]);
+    setCompareData(null);
+    setCompareLoading(false);
+    setPlan(null);
+    setReceipt(null);
+    setReceipts([]);
+    setRecovery(null);
+    setBackupBytes(0);
+    setRollbackReport(null);
+    setBuildOpen(false);
+    setBuildBusy(false);
     try {
-      setReport(await api.scan(trimmed));
+      const nextReport = await api.scan(trimmed);
+      if (request !== scanRequestRef.current) return;
+      setReport(nextReport);
+      try {
+        const nextState = await api.projectState(nextReport.root);
+        if (request === scanRequestRef.current) applyBuildState(nextState);
+      } catch (e) {
+        if (request === scanRequestRef.current) setError(describeError(e));
+      }
     } catch (e) {
+      if (request !== scanRequestRef.current) return;
       setError(describeError(e));
       setReport(null);
     } finally {
-      setScanning(false);
+      if (request === scanRequestRef.current) setScanning(false);
     }
-  }, [root]);
+  }, [root, applyBuildState]);
 
   // 带初始目录时（冒烟模式 / 从命令行传入）自动扫一次
   useEffect(() => {
@@ -180,14 +245,16 @@ export default function App(): JSX.Element {
   /** 只取结构。PBC 切换时会单独再调一次，不会连带重取收敛曲线。 */
   const fetchScene = useCallback(
     async (task: TaskSummary, mode: boolean) => {
+      const request = ++sceneRequestRef.current;
       setSceneLoading(true);
       setSceneError(null);
       try {
-        setScene(await api.scene(absPathOf(task), mode));
+        const nextScene = await api.scene(absPathOf(task), mode);
+        if (request === sceneRequestRef.current) setScene(nextScene);
       } catch (e) {
-        setSceneError(describeError(e));
+        if (request === sceneRequestRef.current) setSceneError(describeError(e));
       } finally {
-        setSceneLoading(false);
+        if (request === sceneRequestRef.current) setSceneLoading(false);
       }
     },
     [absPathOf],
@@ -195,6 +262,7 @@ export default function App(): JSX.Element {
 
   const pick = useCallback(
     async (task: TaskSummary) => {
+      const request = ++convergenceRequestRef.current;
       setSelected(task);
       setSeries(null);
       setScene(null);
@@ -206,9 +274,10 @@ export default function App(): JSX.Element {
       // 结构与收敛互不阻塞：一边失败不该让另一边也空着
       void fetchScene(task, pbc);
       try {
-        setSeries(await api.convergence(absPathOf(task)));
+        const nextSeries = await api.convergence(absPathOf(task));
+        if (request === convergenceRequestRef.current) setSeries(nextSeries);
       } catch (e) {
-        setError(describeError(e));
+        if (request === convergenceRequestRef.current) setError(describeError(e));
       }
     },
     [absPathOf, fetchScene, pbc],
@@ -232,9 +301,10 @@ export default function App(): JSX.Element {
     setBuildOpen(true);
   }, [selected]);
 
-  /** 生成计划（不落盘）。 */
+  /** 生成并持久化 pending 计划，不修改业务文件。 */
   const doBuild = useCallback(async (): Promise<void> => {
-    if (!selected) return;
+    if (!selected || !report) return;
+    const request = scanRequestRef.current;
     const overrides: [string, string][] = overrideText
       .split("\n")
       .map((line) => line.trim())
@@ -246,60 +316,138 @@ export default function App(): JSX.Element {
 
     setBuildBusy(true);
     try {
-      const p = await api.build(bootProject, selected.rel_path, targetDir.trim(), overrides);
+      const p = await api.build(report.root, selected.rel_path, targetDir.trim(), overrides);
+      if (request !== scanRequestRef.current) return;
       setPlan(p);
       setReceipt(null);
       setRollbackReport(null);
       setBuildOpen(false);
       setRightTab("build");
     } catch (e) {
-      setError(describeError(e));
+      if (request === scanRequestRef.current) setError(describeError(e));
     } finally {
-      setBuildBusy(false);
+      if (request === scanRequestRef.current) setBuildBusy(false);
     }
-  }, [selected, bootProject, targetDir, overrideText]);
+  }, [selected, report, targetDir, overrideText]);
 
   const doApply = useCallback(async (): Promise<void> => {
     if (!plan) return;
+    const approved = plan;
+    const request = scanRequestRef.current;
     setBuildBusy(true);
     try {
-      const r = await api.apply(plan);
+      const r = await api.apply(approved);
+      if (request !== scanRequestRef.current) return;
       setReceipt(r);
       setPlan(null);
+      await refreshBuildState(approved.root);
     } catch (e) {
-      setError(describeError(e));
+      if (request === scanRequestRef.current) {
+        setError(describeError(e));
+        await refreshBuildState(approved.root).catch(() => undefined);
+      }
     } finally {
-      setBuildBusy(false);
+      if (request === scanRequestRef.current) setBuildBusy(false);
     }
-  }, [plan]);
+  }, [plan, refreshBuildState]);
 
   const doRollback = useCallback(async (): Promise<void> => {
     if (!receipt) return;
+    const selectedReceipt = receipt;
+    const request = scanRequestRef.current;
     setBuildBusy(true);
     try {
-      setRollbackReport(await api.rollback(receipt));
+      const result = await api.rollback(selectedReceipt);
+      if (request !== scanRequestRef.current) return;
+      setRollbackReport(result);
+      await refreshBuildState(selectedReceipt.root);
     } catch (e) {
-      setError(describeError(e));
+      if (request === scanRequestRef.current) setError(describeError(e));
     } finally {
-      setBuildBusy(false);
+      if (request === scanRequestRef.current) setBuildBusy(false);
     }
-  }, [receipt]);
+  }, [receipt, refreshBuildState]);
+
+  const doRecover = useCallback(async (): Promise<void> => {
+    if (!report || !recovery) return;
+    const request = scanRequestRef.current;
+    setBuildBusy(true);
+    try {
+      const result = await api.recover(report.root);
+      const next = await refreshBuildState(report.root);
+      if (request !== scanRequestRef.current) return;
+      setRollbackReport(null);
+      const record = next?.receipts.find(
+        (candidate) => candidate.receipt.plan_hash === result.plan_hash,
+      );
+      setReceipt(record?.receipt ?? null);
+    } catch (e) {
+      if (request === scanRequestRef.current) setError(describeError(e));
+    } finally {
+      if (request === scanRequestRef.current) setBuildBusy(false);
+    }
+  }, [report, recovery, refreshBuildState]);
+
+  const doPrune = useCallback(async (): Promise<void> => {
+    if (!report) return;
+    const request = scanRequestRef.current;
+    setBuildBusy(true);
+    try {
+      await api.pruneBackups(report.root);
+      await refreshBuildState(report.root);
+    } catch (e) {
+      if (request === scanRequestRef.current) setError(describeError(e));
+    } finally {
+      if (request === scanRequestRef.current) setBuildBusy(false);
+    }
+  }, [report, refreshBuildState]);
+
+  const doDiscard = useCallback(async (): Promise<void> => {
+    if (receipt || !plan) {
+      setReceipt(null);
+      setRollbackReport(null);
+      return;
+    }
+    const discarded = plan;
+    const request = scanRequestRef.current;
+    setBuildBusy(true);
+    try {
+      await api.discardPlan(discarded.root);
+      if (request !== scanRequestRef.current) return;
+      setPlan(null);
+      setRollbackReport(null);
+    } catch (e) {
+      if (request === scanRequestRef.current) setError(describeError(e));
+    } finally {
+      if (request === scanRequestRef.current) setBuildBusy(false);
+    }
+  }, [plan, receipt]);
+
+  const handleCheckedChange = useCallback((keys: string[]) => {
+    compareRequestRef.current += 1;
+    setCompareData(null);
+    setCompareLoading(false);
+    setChecked(keys);
+  }, []);
 
   /** 对比勾选的任务。至少两个才有意义。 */
   const doCompare = useCallback(async (): Promise<void> => {
     if (!report || checked.length < 2) return;
-    setPanelLoading("compare");
+    const request = ++compareRequestRef.current;
+    setCompareLoading(true);
     try {
       const paths = checked
         .map((rel) => report.tasks.find((t) => t.rel_path === rel))
         .filter((t): t is TaskSummary => Boolean(t))
         .map((t) => absPathOf(t));
-      setCompareData(await api.compare(paths));
+      const nextCompare = await api.compare(paths);
+      if (request !== compareRequestRef.current) return;
+      setCompareData(nextCompare);
       setRightTab("compare");
     } catch (e) {
-      setError(describeError(e));
+      if (request === compareRequestRef.current) setError(describeError(e));
     } finally {
-      setPanelLoading(null);
+      if (request === compareRequestRef.current) setCompareLoading(false);
     }
   }, [report, checked, absPathOf]);
 
@@ -366,15 +514,15 @@ export default function App(): JSX.Element {
   }, [report, checked, compareData, doCompare]);
 
   // `?build=<目标目录>`：自动生成一份计划并切到构建页（截图与演示用）。
-  // 注意 build 只产出计划、**不写盘**，对真实项目调用是安全的。
+  // build 只保存 pending 计划，不修改 VASP 业务文件；放行后才写业务文件。
   useEffect(() => {
-    if (!selected || plan || receipt) return;
+    if (!selected || !report || plan || receipt) return;
     const target = new URLSearchParams(window.location.search).get("build");
     if (!target) return;
     let cancelled = false;
     void (async () => {
       try {
-        const p = await api.build(bootProject, selected.rel_path, target, [["ENCUT", "520"]]);
+        const p = await api.build(report.root, selected.rel_path, target, [["ENCUT", "520"]]);
         if (!cancelled) {
           setPlan(p);
           setRightTab("build");
@@ -386,7 +534,7 @@ export default function App(): JSX.Element {
     return () => {
       cancelled = true;
     };
-  }, [selected, bootProject, plan, receipt]);
+  }, [selected, report, plan, receipt]);
 
   // 冒烟模式：扫完自动选中一个任务，让面板有内容可截。
   // `?task=<rel_path>` 可指定具体任务；否则选第一个已完成的。
@@ -499,7 +647,12 @@ export default function App(): JSX.Element {
                 </Button>
               )}
               {checked.length >= 2 && (
-                <Button size="small" type="primary" onClick={() => void doCompare()}>
+                <Button
+                  size="small"
+                  type="primary"
+                  loading={compareLoading}
+                  onClick={() => void doCompare()}
+                >
                   对比这 {checked.length} 个
                 </Button>
               )}
@@ -525,7 +678,7 @@ export default function App(): JSX.Element {
                         pagination={{ pageSize: 50, size: "small" }}
                         rowSelection={{
                           selectedRowKeys: checked,
-                          onChange: (keys) => setChecked(keys as string[]),
+                          onChange: (keys) => handleCheckedChange(keys as string[]),
                           columnWidth: 32,
                         }}
                         onRow={(r) => ({
@@ -672,11 +825,10 @@ export default function App(): JSX.Element {
               },
               {
                 key: "ai",
-                label: "AI 分析",
+                label: "Hermes 对话",
                 children: (
                   <AiPanel
-                    taskAbsPath={selected ? (absPathOf(selected) ?? null) : null}
-                    taskName={selected?.rel_path ?? null}
+                    projectRoot={report?.root ?? null}
                     hermesAvailable={hermes?.found ?? false}
                     hermesReason={hermes?.reason ?? null}
                   />
@@ -689,13 +841,18 @@ export default function App(): JSX.Element {
                   <BuildPanel
                     plan={plan}
                     receipt={receipt}
+                    receipts={receipts}
+                    recovery={recovery}
+                    backupBytes={backupBytes}
                     rollbackReport={rollbackReport}
                     busy={buildBusy}
                     onApply={() => void doApply()}
                     onRollback={() => void doRollback()}
-                    onDiscard={() => {
-                      setPlan(null);
-                      setReceipt(null);
+                    onDiscard={() => void doDiscard()}
+                    onRecover={() => void doRecover()}
+                    onPrune={() => void doPrune()}
+                    onSelectReceipt={(record) => {
+                      setReceipt(record.receipt);
                       setRollbackReport(null);
                     }}
                   />
