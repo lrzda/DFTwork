@@ -29,18 +29,20 @@ impl<'a> GetTrajectory<'a> {
             )));
         }
 
-        let mut scanner = TrajectoryScanner::new();
-        let mut scan_err: Option<AppError> = None;
-        // 流式：XDATCAR 可能几十 MB，不能整读
-        if let Err(e) = self.fs.scan_lines(&path, &mut |line| scanner.feed(line)) {
-            scan_err = Some(e);
-        }
-        if let Some(e) = scan_err {
-            return Err(e);
-        }
-
-        let mut report = scanner.finish().map_err(|e| AppError::Validation(e.to_string()))?;
+        // 第一遍统计真实总帧数，第二遍只保留计划中的样本；两遍都不整读文件。
+        let total_frames = self.scan(&path, TrajectoryScanner::new())?.total_frames;
+        let mut report = self.scan(&path, TrajectoryScanner::sampled(total_frames))?;
         report.source_file = path.to_string_lossy().to_string();
         Ok(report)
+    }
+
+    fn scan(
+        &self,
+        path: &Path,
+        mut scanner: TrajectoryScanner,
+    ) -> AppResult<TrajectoryReport> {
+        self.fs
+            .scan_lines(path, &mut |line| scanner.feed(line))?;
+        scanner.finish().map_err(AppError::from)
     }
 }

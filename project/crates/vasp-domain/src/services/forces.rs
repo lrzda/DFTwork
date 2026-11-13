@@ -58,23 +58,26 @@ pub struct ForceStressScanner {
     total_force_sets: usize,
     total_stress_sets: usize,
     ionic_index: u32,
+    seen_ionic_marker: bool,
     truncated: bool,
 }
 
 impl ForceStressScanner {
     pub fn new() -> Self {
         Self {
-            // 离子步从 1 开始编号；单点计算的力段出现在第一个
-            // FREE ENERGIE 之前，用 0 会让人误以为是「第零步」
+            // 单点计算的力段也可能出现在第一个 FREE ENERGIE 之前。
             ionic_index: 1,
             ..Default::default()
         }
     }
 
     pub fn feed(&mut self, line: &str) {
-        // 离子步计数（用于给力和应力打标）
         if ionic_marker_re().is_match(line) {
-            self.ionic_index += 1;
+            if self.seen_ionic_marker {
+                self.ionic_index += 1;
+            } else {
+                self.seen_ionic_marker = true;
+            }
         }
 
         // 力表头 → 下一行是虚线，再之后是数据
@@ -215,6 +218,18 @@ mod tests {
         assert!((c[5] - 12.17631).abs() < 1e-6);
         let expect_p = (36.83850 + 9.46328 + 9.83154) / 3.0;
         assert!((st.sets[0].pressure_kb - expect_p).abs() < 1e-9);
+    }
+
+    #[test]
+    fn first_marker_belongs_to_ionic_step_one() {
+        let mut s = ForceStressScanner::new();
+        for line in SAMPLE.lines() {
+            s.feed(line);
+        }
+        let (forces, stress) = s.finish();
+
+        assert_eq!(forces.sets[0].ionic_index, 1);
+        assert_eq!(stress.sets[0].ionic_index, 2);
     }
 
     #[test]

@@ -25,13 +25,13 @@ pub struct ToolCall {
 
 /// 一次分析的结果。
 ///
-/// **`ok` 的判据是 `exit_code == 0`，不是进程退出码**：实测模型不存在时
-/// 进程 exit=1 但 stdout 仍输出完整的 system + result 事件，错误说明在
-/// `result.text` 里。只认进程退出码会在「进程正常退出但模型报错」时误判成功。
+/// `exit_code` 综合 Hermes 的 `result.exit_code` 与进程退出状态：模型失败可能仍
+/// 输出完整 JSONL，进程失败也可能带有伪成功 result；二者都不能误判为成功。
+/// 超时由独立的 `timed_out` 标记。
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct AnalysisReport {
     pub session_id: String,
-    /// Hermes 自己报告的退出码。
+    /// Hermes 报告的结果码；进程失败或无 result 时为宿主记录的非零值。
     pub exit_code: i32,
     /// 模型的完整回答（已把 token 级片段拼接起来）。
     pub text: String,

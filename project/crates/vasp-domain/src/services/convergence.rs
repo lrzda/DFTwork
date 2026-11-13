@@ -33,19 +33,23 @@ fn parse_fortran_float(s: &str) -> Option<f64> {
     fixed.parse::<f64>().ok()
 }
 
-/// 解析 OSZICAR 里的离子步能量。
-///
-/// **只读 F 值**。它到底是自由能还是总能取决于 ISIF，代码不替它决定，
-/// 界面上按 INCAR 的 ISIF 显示对应标签。
-pub fn parse_oszicar(text: &str) -> Vec<IonicStep> {
-    let re = ionic_re();
-    let mut steps = Vec::new();
-    for line in text.lines() {
-        if let Some(c) = re.captures(line) {
+/// OSZICAR 的流式离子步扫描器。
+#[derive(Default)]
+pub struct OszicarScanner {
+    steps: Vec<IonicStep>,
+}
+
+impl OszicarScanner {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn feed(&mut self, line: &str) {
+        if let Some(c) = ionic_re().captures(line) {
             let index = c[1].parse::<u32>().ok();
             let energy = parse_fortran_float(&c[2]);
             if let Some(index) = index {
-                steps.push(IonicStep {
+                self.steps.push(IonicStep {
                     index,
                     energy_ev: energy,
                     max_force_ev_per_a: None,
@@ -53,14 +57,23 @@ pub fn parse_oszicar(text: &str) -> Vec<IonicStep> {
             }
         }
     }
-    steps
+
+    pub fn finish(self) -> Vec<IonicStep> {
+        self.steps
+    }
+}
+
+/// 解析 OSZICAR 里的离子步能量。只读 F 值，不推断自由能或总能。
+pub fn parse_oszicar(text: &str) -> Vec<IonicStep> {
+    let mut scanner = OszicarScanner::new();
+    for line in text.lines() {
+        scanner.feed(line);
+    }
+    scanner.finish()
 }
 
 /// VASP 自己写在 OUTCAR 里的每步汇总行：
 /// `FORCES: max atom, RMS     0.123456   0.045678`（VASP 5，同一行）
-///
-/// **必须优先用它**——这是 VASP 自己算好的值，而数据段解析要靠
-/// `total drift:` / 分隔线判断块的起止，多一个空行就可能错一步。
 fn max_atom_re() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
     RE.get_or_init(|| {
@@ -68,66 +81,72 @@ fn max_atom_re() -> &'static Regex {
     })
 }
 
-/// 从 OUTCAR 提取每个离子步的最大力（eV/Å）。
-///
-/// 两条路径，与原实现 `parser.js::parseMaxForces` 对齐：
-/// 1. **优先** `FORCES: max atom, RMS <值>` 行（每步一行）；
-/// 2. 取不到时，退化到 `POSITION  TOTAL-FORCE (eV/Angst)` 数据段，
-///    以 `total drift:` 或数据结束为分块标志。
-pub fn parse_outcar_forces(text: &str) -> Vec<f64> {
-    // 1) 汇总行
-    let mut inline = Vec::new();
-    for line in text.lines() {
+/// OUTCAR 最大力流式扫描器。VASP 的汇总行优先，缺失时回退到力矩阵。
+#[derive(Default)]
+pub struct OutcarForceScanner {
+    inline: Vec<f64>,
+    blocks: Vec<f64>,
+    in_block: bool,
+    block_max: f64,
+    rows: usize,
+}
+
+impl OutcarForceScanner {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn feed(&mut self, line: &str) {
         if let Some(c) = max_atom_re().captures(line) {
             if let Some(v) = parse_fortran_float(&c[1]) {
-                inline.push(v);
+                self.inline.push(v);
             }
         }
-    }
-    if !inline.is_empty() {
-        return inline;
-    }
 
-    // 2) 退化：数据段
-    let re = force_block_re();
-    let mut out = Vec::new();
-    let mut in_block = false;
-    let mut block_max: f64 = 0.0;
-    let mut rows = 0usize;
-
-    for line in text.lines() {
         if line.contains("TOTAL-FORCE") {
-            if in_block && rows > 0 {
-                out.push(block_max);
-            }
-            in_block = true;
-            block_max = 0.0;
-            rows = 0;
-            continue;
+            self.finish_block();
+            self.in_block = true;
+            return;
         }
-        if !in_block {
-            continue;
+        if !self.in_block {
+            return;
         }
-        if let Some(c) = re.captures(line) {
+        if let Some(c) = force_block_re().captures(line) {
             let fx = parse_fortran_float(&c[4]).unwrap_or(0.0);
             let fy = parse_fortran_float(&c[5]).unwrap_or(0.0);
             let fz = parse_fortran_float(&c[6]).unwrap_or(0.0);
-            let norm = (fx * fx + fy * fy + fz * fz).sqrt();
-            if norm > block_max {
-                block_max = norm;
-            }
-            rows += 1;
-        } else if rows > 0 {
-            out.push(block_max);
-            in_block = false;
-            block_max = 0.0;
-            rows = 0;
+            self.block_max = self.block_max.max((fx * fx + fy * fy + fz * fz).sqrt());
+            self.rows += 1;
+        } else if self.rows > 0 {
+            self.finish_block();
         }
     }
-    if in_block && rows > 0 {
-        out.push(block_max);
+
+    fn finish_block(&mut self) {
+        if self.in_block && self.rows > 0 {
+            self.blocks.push(self.block_max);
+        }
+        self.in_block = false;
+        self.block_max = 0.0;
+        self.rows = 0;
     }
-    out
+
+    pub fn finish(mut self) -> Vec<f64> {
+        self.finish_block();
+        if self.inline.is_empty() {
+            self.blocks
+        } else {
+            self.inline
+        }
+    }
+}
+
+pub fn parse_outcar_forces(text: &str) -> Vec<f64> {
+    let mut scanner = OutcarForceScanner::new();
+    for line in text.lines() {
+        scanner.feed(line);
+    }
+    scanner.finish()
 }
 
 /// 合并能量与力。两者长度可能不同（OUTCAR 只写了尾部、或力段缺失），
@@ -197,5 +216,23 @@ DAV:   1    -0.123456700000E+03   -0.123456E+03   -0.500000E+02   318   0.111E+0
         assert_eq!(f.len(), 2);
         assert!((f[0] - 0.1).abs() < 1e-9);
         assert!((f[1] - 0.5).abs() < 1e-9);
+    }
+
+    #[test]
+    fn inline_force_summaries_take_priority_over_blocks() {
+        let outcar = "\
+  POSITION                                       TOTAL-FORCE (eV/Angst)
+ -----------------------------------------------------------------------------------
+      0.00000      0.00000      0.00000         0.900000      0.000000      0.000000
+
+ FORCES: max atom, RMS     0.125000   0.045678
+";
+        let mut scanner = OutcarForceScanner::new();
+        for line in outcar.lines() {
+            scanner.feed(line);
+        }
+
+        assert_eq!(scanner.finish(), vec![0.125]);
+        assert_eq!(parse_outcar_forces(outcar), vec![0.125]);
     }
 }

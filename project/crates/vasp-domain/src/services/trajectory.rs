@@ -16,14 +16,11 @@
 
 use crate::{DomainError, DomainResult, TrajectoryFrame, TrajectoryReport};
 
-/// 头部固定 7 行（注释 / scale / 晶格 3 行 / 元素 / 计数）。
-const HEADER_LINES: usize = 7;
-
 /// 帧数上限。超过就均匀抽样——前端播放器真正能看清的也就几百帧，
 /// 而几万帧的数据会让 JSON 变成几十 MB，IPC 直接卡死。
 pub const MAX_FRAMES: usize = 600;
 
-/// 流式扫描器：喂一行、攒一帧。
+/// 流式扫描器。第一遍只计数，第二遍按计划保留样本，内存不随总帧数增长。
 pub struct TrajectoryScanner {
     line_no: usize,
     scale: f64,
@@ -32,11 +29,12 @@ pub struct TrajectoryScanner {
     counts: Vec<usize>,
     comment: String,
     n_atoms: usize,
-    /// 当前帧正在攒的坐标。
     cur: Vec<[f64; 3]>,
     cur_index: usize,
     fractional: bool,
     frames: Vec<TrajectoryFrame>,
+    total_frames: usize,
+    retained_frames: Option<std::collections::HashSet<usize>>,
     /// 中途重写了头部（变胞 MD），记下来提醒调用方。
     header_rewritten: bool,
 }
@@ -48,6 +46,7 @@ impl Default for TrajectoryScanner {
 }
 
 impl TrajectoryScanner {
+    /// 计数模式：完整扫描，但不保存坐标帧。
     pub fn new() -> Self {
         Self {
             line_no: 0,
@@ -61,35 +60,49 @@ impl TrajectoryScanner {
             cur_index: 0,
             fractional: true,
             frames: Vec::new(),
+            total_frames: 0,
+            retained_frames: None,
             header_rewritten: false,
         }
     }
 
-    /// 是否还要继续读（攒够帧后就不再读到底，XDATCAR 可能很大）。
-    pub fn wants_more(&self) -> bool {
-        // 多读一点再停，便于统计 total_frames 的真实量级
-        self.frames.len() < MAX_FRAMES * 4
+    /// 抽样模式：均匀覆盖完整区间，并始终保留首尾帧。
+    pub fn sampled(total_frames: usize) -> Self {
+        let sample_count = total_frames.min(MAX_FRAMES);
+        let retained_frames = (0..sample_count)
+            .map(|i| {
+                if sample_count == 1 {
+                    0
+                } else {
+                    i * (total_frames - 1) / (sample_count - 1)
+                }
+            })
+            .collect();
+        Self {
+            retained_frames: Some(retained_frames),
+            ..Self::new()
+        }
     }
 
-    /// 喂一行。返回是否还要继续（`false` 让调用方提前结束扫描）。
+    /// 必须读到文件末尾，才能取得真实总帧数和最后一帧。
+    pub fn wants_more(&self) -> bool {
+        true
+    }
+
     pub fn feed(&mut self, line: &str) -> bool {
         self.line_no += 1;
         let t = line.trim();
 
         match self.line_no {
             1 => self.comment = t.to_string(),
-            2 => {
-                self.scale = t.parse().unwrap_or(1.0);
-            }
+            2 => self.scale = t.parse().unwrap_or(1.0),
             3..=5 => {
                 let idx = self.line_no - 3;
                 if let Some(v) = parse_vec3(t) {
                     self.cell[idx] = v;
                 }
             }
-            6 => {
-                self.elements = t.split_whitespace().map(|s| s.to_string()).collect();
-            }
+            6 => self.elements = t.split_whitespace().map(|s| s.to_string()).collect(),
             7 => {
                 self.counts = t
                     .split_whitespace()
@@ -99,20 +112,16 @@ impl TrajectoryScanner {
             }
             _ => {
                 if t.is_empty() {
-                    return self.wants_more();
+                    return true;
                 }
 
                 let lower = t.to_ascii_lowercase();
                 if lower.contains("configuration") {
-                    // 变胞 MD 会在中途重写整个头部（comment/scale/cell/elements/counts）
-                    // 首版不重建，但要让人知道看到的后续帧用的是旧晶格。
                     if lower.contains("direct") || lower.contains("cartesian") {
                         self.fractional = lower.contains("direct");
                     }
-                    // 上一帧收尾
                     self.flush_frame();
                     self.cur_index += 1;
-                    // 序号取行里的数字，取不到就用计数
                     if let Some(n) = t
                         .split('=')
                         .nth(1)
@@ -120,20 +129,21 @@ impl TrajectoryScanner {
                     {
                         self.cur_index = n;
                     }
-                    return self.wants_more();
+                    return true;
                 }
 
-                // 坐标行
                 if self.cur.len() < self.n_atoms {
                     if let Some(v) = parse_vec3(t) {
                         self.cur.push(v);
                     }
+                } else if self.n_atoms > 0 && parse_vec3(t).is_some() {
+                    // 完整坐标帧之后、下一帧标记之前的额外套头晶格。
+                    self.header_rewritten = true;
                 }
-                // 坐标攒满不立刻 flush：等下一帧的 configuration 行或文件结束，
-                // 免得把「刚好攒满」和「最后一帧」两种情况写两遍。
+                // 等下一帧的 configuration 或文件结束时收尾，避免重复保存末帧。
             }
         }
-        self.wants_more()
+        true
     }
 
     fn flush_frame(&mut self) {
@@ -141,18 +151,27 @@ impl TrajectoryScanner {
             self.cur.clear();
             return;
         }
-        let positions = if self.fractional {
-            self.cur
-                .iter()
-                .map(|f| frac_to_cart(f, &self.scaled_cell()))
-                .collect()
-        } else {
-            self.cur.clone()
-        };
-        self.frames.push(TrajectoryFrame {
-            index: self.cur_index.max(1),
-            positions,
-        });
+        let retain = self
+            .retained_frames
+            .as_ref()
+            .is_some_and(|indices| indices.contains(&self.total_frames));
+        if retain {
+            let cell = self.scaled_cell();
+            let scale = if self.scale > 0.0 { self.scale } else { 1.0 };
+            let positions = if self.fractional {
+                self.cur.iter().map(|f| frac_to_cart(f, &cell)).collect()
+            } else {
+                self.cur
+                    .iter()
+                    .map(|p| [p[0] * scale, p[1] * scale, p[2] * scale])
+                    .collect()
+            };
+            self.frames.push(TrajectoryFrame {
+                index: self.cur_index.max(1),
+                positions,
+            });
+        }
+        self.total_frames += 1;
         self.cur.clear();
     }
 
@@ -165,14 +184,13 @@ impl TrajectoryScanner {
         ]
     }
 
-    /// 收尾：把最后一帧也收进来，然后按上限降采样。
     pub fn finish(mut self) -> DomainResult<TrajectoryReport> {
         self.flush_frame();
-        // 后面 comment/elements/counts 会被 move 出去，先把要用到的都取出来
         let n_atoms = self.n_atoms;
         let cell = self.scaled_cell();
+        let total = self.total_frames;
 
-        if self.frames.is_empty() {
+        if total == 0 {
             return Err(DomainError::InvalidStructure(
                 "XDATCAR 里没有解析到任何结构帧".to_string(),
             ));
@@ -183,25 +201,7 @@ impl TrajectoryScanner {
             ));
         }
 
-        let total = self.frames.len();
-        let sampled = total > MAX_FRAMES;
-        let frames = if sampled {
-            // 均匀抽样，但一定保留首尾两帧——否则看不出「从哪来、到哪去」
-            let stride = (total as f64 / MAX_FRAMES as f64).ceil() as usize;
-            let mut picked: Vec<TrajectoryFrame> = self
-                .frames
-                .iter()
-                .step_by(stride.max(1))
-                .cloned()
-                .collect();
-            if picked.last().map(|f| f.index) != self.frames.last().map(|f| f.index) {
-                picked.push(self.frames.last().unwrap().clone());
-            }
-            picked
-        } else {
-            self.frames.clone()
-        };
-
+        let sampled = self.retained_frames.is_some() && total > MAX_FRAMES;
         let mut note = format!(
             "{} 帧，{} 个原子，坐标系 {}",
             total,
@@ -209,7 +209,7 @@ impl TrajectoryScanner {
             if self.fractional { "Direct（分数）" } else { "Cartesian" }
         );
         if sampled {
-            note.push_str(&format!("；帧数过多，已均匀抽样到 {} 帧", frames.len()));
+            note.push_str(&format!("；帧数过多，已均匀抽样到 {} 帧", self.frames.len()));
         }
         if self.header_rewritten {
             note.push_str("；文件中途重写过头部（变胞），后段帧仍按首帧晶格渲染");
@@ -221,7 +221,7 @@ impl TrajectoryScanner {
             elements: self.elements,
             counts: self.counts,
             cell,
-            frames,
+            frames: self.frames,
             total_frames: total,
             sampled,
             note,
@@ -268,12 +268,21 @@ demo
   0.25 0.0 0.0
 ";
 
-    fn scan(text: &str) -> TrajectoryReport {
-        let mut s = TrajectoryScanner::new();
+    fn feed_all(text: &str, scanner: &mut TrajectoryScanner) {
         for line in text.lines() {
-            s.feed(line);
+            if !scanner.feed(line) {
+                break;
+            }
         }
-        s.finish().unwrap()
+    }
+
+    fn scan(text: &str) -> TrajectoryReport {
+        let mut counter = TrajectoryScanner::new();
+        feed_all(text, &mut counter);
+        let total_frames = counter.finish().unwrap().total_frames;
+        let mut scanner = TrajectoryScanner::sampled(total_frames);
+        feed_all(text, &mut scanner);
+        scanner.finish().unwrap()
     }
 
     #[test]
@@ -304,6 +313,54 @@ demo
         assert!((r.cell[0][0] - 20.0).abs() < 1e-9);
         // 0.5 × 20 = 10
         assert!((r.frames[0].positions[1][0] - 10.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn large_trajectory_counts_and_keeps_the_actual_last_frame() {
+        let header = SAMPLE.split(" Direct configuration").next().unwrap();
+        let mut text = String::from(header);
+        for i in 1..=2501 {
+            text.push_str(&format!(" Direct configuration= {i}\n"));
+            text.push_str("  0.0 0.0 0.0\n  0.5 0.5 0.5\n  0.25 0.0 0.0\n");
+        }
+
+        let r = scan(&text);
+
+        assert_eq!(r.total_frames, 2501);
+        assert_eq!(r.frames.first().unwrap().index, 1);
+        assert_eq!(r.frames.last().unwrap().index, 2501);
+        assert!(r.frames.len() <= MAX_FRAMES + 2);
+    }
+
+    #[test]
+    fn cartesian_coordinates_include_positive_scale() {
+        let cartesian = SAMPLE.replace("   1.0\n", "   2.0\n").replace("Direct", "Cartesian");
+        let r = scan(&cartesian);
+
+        assert_eq!(r.frames[0].positions[0], [0.0, 0.0, 0.0]);
+        assert_eq!(r.frames[0].positions[1], [1.0, 1.0, 1.0]);
+    }
+
+    #[test]
+    fn negative_scale_is_rejected() {
+        let negative = SAMPLE.replace("   1.0\n", "  -1.0\n");
+        let mut scanner = TrajectoryScanner::new();
+        feed_all(&negative, &mut scanner);
+
+        let error = scanner.finish().unwrap_err();
+        assert!(error.to_string().contains("scale 是负数"));
+    }
+
+    #[test]
+    fn repeated_cell_header_warns_about_variable_cell() {
+        let repeated = SAMPLE.replace(
+            " Direct configuration=     2",
+            "demo\n1.0\n10.0 0.0 0.0\n0.0 10.0 0.0\n0.0 0.0 10.0\nO U\n2 1\nDirect configuration=     2",
+        );
+        let r = scan(&repeated);
+
+        assert_eq!(r.total_frames, 2);
+        assert!(r.note.contains("变胞"), "缺少变胞提示：{}", r.note);
     }
 
     #[test]

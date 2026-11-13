@@ -1,7 +1,7 @@
-use crate::ports::{Fs, MAX_FULL_READ};
+use crate::ports::Fs;
 use crate::{AppError, AppResult};
 use std::path::Path;
-use vasp_domain::{merge_series, parse_oszicar, parse_outcar_forces, ConvergenceSeries};
+use vasp_domain::{merge_series, ConvergenceSeries, OszicarScanner, OutcarForceScanner};
 
 /// 读一个任务的收敛序列（离子步能量 + 最大力）。
 pub struct GetConvergence<'a> {
@@ -22,23 +22,107 @@ impl<'a> GetConvergence<'a> {
             )));
         }
 
-        let oszicar = self
-            .fs
-            .read_text(&oszicar_path, MAX_FULL_READ)
-            .map_err(|e| AppError::io(oszicar_path.display().to_string(), e))?;
-        let energies = parse_oszicar(&oszicar);
+        let mut oszicar = OszicarScanner::new();
+        self.fs.scan_lines(&oszicar_path, &mut |line| {
+            oszicar.feed(line);
+            true
+        })?;
+        let energies = oszicar.finish();
 
-        // 力是可选的：拿不到就留 None，曲线只画能量，不补 0。
+        // 只有 OUTCAR 不存在时力才是可选空值；存在但读取失败必须报错。
         let outcar_path = task_dir.join("OUTCAR");
         let forces = if self.fs.exists(&outcar_path) {
-            match self.fs.read_text(&outcar_path, MAX_FULL_READ) {
-                Ok(text) => parse_outcar_forces(&text),
-                Err(_) => Vec::new(),
-            }
+            let mut outcar = OutcarForceScanner::new();
+            self.fs.scan_lines(&outcar_path, &mut |line| {
+                outcar.feed(line);
+                true
+            })?;
+            outcar.finish()
         } else {
             Vec::new()
         };
 
         Ok(merge_series("OSZICAR", energies, forces))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ports::DirEntryInfo;
+    use std::path::PathBuf;
+
+    struct OutcarReadFailure;
+
+    impl Fs for OutcarReadFailure {
+        fn list_dir(&self, _: &Path) -> Result<Vec<DirEntryInfo>, AppError> {
+            unreachable!()
+        }
+
+        fn read_text(&self, path: &Path, _: u64) -> Result<String, AppError> {
+            if path.ends_with("OUTCAR") {
+                Err(AppError::io(
+                    path.display().to_string(),
+                    std::io::Error::new(std::io::ErrorKind::Other, "read failed"),
+                ))
+            } else {
+                Ok("1 F= -10.0 E0= -10.0\n".into())
+            }
+        }
+
+        fn read_tail(&self, _: &Path, _: u64) -> Result<String, AppError> {
+            unreachable!()
+        }
+
+        fn scan_lines(
+            &self,
+            path: &Path,
+            visit: &mut dyn FnMut(&str) -> bool,
+        ) -> Result<usize, AppError> {
+            if path.ends_with("OUTCAR") {
+                Err(AppError::io(
+                    path.display().to_string(),
+                    std::io::Error::new(std::io::ErrorKind::Other, "read failed"),
+                ))
+            } else {
+                visit("1 F= -10.0 E0= -10.0");
+                Ok(1)
+            }
+        }
+
+        fn exists(&self, _: &Path) -> bool {
+            true
+        }
+
+        fn canonicalize(&self, path: &Path) -> Result<PathBuf, AppError> {
+            Ok(path.into())
+        }
+
+        fn is_symlink(&self, _: &Path) -> bool {
+            false
+        }
+
+        fn is_dir(&self, _: &Path) -> bool {
+            true
+        }
+
+        fn write_text(&self, _: &Path, _: &str) -> Result<(), AppError> {
+            unreachable!()
+        }
+
+        fn remove_file(&self, _: &Path) -> Result<(), AppError> {
+            unreachable!()
+        }
+
+        fn remove_dir_all(&self, _: &Path) -> Result<(), AppError> {
+            unreachable!()
+        }
+    }
+
+    #[test]
+    fn outcar_read_failure_is_not_an_empty_success() {
+        let result = GetConvergence::new(&OutcarReadFailure).execute(Path::new("task"));
+
+        assert!(result.is_err(), "OUTCAR 读取失败被吞成了空力数组");
     }
 }
