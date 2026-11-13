@@ -112,9 +112,10 @@ impl<'a> BuildInputs<'a> {
             ));
         }
 
-        let hash = plan_hash::compute(&items);
+        let root = req.root.display().to_string();
+        let hash = plan_hash::compute(&root, &items);
         Ok(BuildPlan {
-            root: req.root.display().to_string(),
+            root,
             items,
             plan_hash: hash,
             created_at: self.clock.now_iso(),

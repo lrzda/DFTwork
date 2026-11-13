@@ -214,7 +214,7 @@ export interface BuildItem {
   action: WriteAction;
   /** 为什么这样改，显示在 diff 面板上。 */
   reason: string;
-  /** 覆盖前的原内容，仅用于显示 diff；新建项为 null。 */
+  /** 覆盖前的原内容，用于 diff 与写入前像校验；新建项为 null。 */
   previous_content: string | null;
 }
 
@@ -229,6 +229,8 @@ export interface RestoreEntry {
   rel_path: string;
   /** 有的还原这个 blob；null 表示原本不存在，回滚时删除。 */
   blob: string | null;
+  /** apply 后内容的 SHA-256；回滚据此拒绝覆盖后续修改。 */
+  applied_hash: string | null;
 }
 
 export interface BuildReceipt {
@@ -245,6 +247,39 @@ export interface RollbackReport {
   restored: string[];
   removed: string[];
   finished_at: string;
+}
+
+export interface ReceiptRecord {
+  receipt: BuildReceipt;
+  rolled_back: boolean;
+  rollback_error: string | null;
+}
+
+export interface RecoveryNotice {
+  plan_hash: string;
+  backup_dir: string;
+  committed: boolean;
+}
+
+export interface BuildState {
+  pending: BuildPlan | null;
+  receipts: ReceiptRecord[];
+  recovery: RecoveryNotice | null;
+  backup_bytes: number;
+}
+
+export interface RecoveryReport {
+  plan_hash: string;
+  outcome: "committed" | "rolled_back";
+  restored: string[];
+  removed: string[];
+  finished_at: string;
+}
+
+export interface RetentionReport {
+  removed_batches: number;
+  freed_bytes: number;
+  backup_bytes: number;
 }
 
 // ───────────────────────── AI 分析 ─────────────────────────
@@ -333,29 +368,6 @@ export interface HermesCapability {
   version: string | null;
   supports_stream_json: boolean;
   reason: string | null;
-}
-
-export interface BuildItem {
-  rel_path: string;
-  content: string;
-  action: "create" | "overwrite" | "skip";
-  reason: string;
-}
-
-export interface BuildPlan {
-  root: string;
-  items: BuildItem[];
-  /** 放行凭据：内容一变就失效。 */
-  plan_hash: string;
-  created_at: string;
-}
-
-export interface BuildReceipt {
-  plan_hash: string;
-  written: string[];
-  skipped: string[];
-  backup_dir: string | null;
-  finished_at: string;
 }
 
 export interface VersionInfo {
