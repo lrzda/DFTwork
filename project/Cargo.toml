@@ -8,10 +8,10 @@ members = [
 ]
 
 [workspace.package]
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 license = "MIT"
-repository = "https://github.com/21271122/VASPFlow"
+repository = "https://github.com/lrzda/DFTwork"
 
 [workspace.dependencies]
 serde = { version = "1", features = ["derive"] }
@@ -23,7 +23,7 @@ regex = "1"
 clap = { version = "4", features = ["derive"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
-time = { version = "0.3", features = ["formatting", "macros"] }
+time = { version = "0.3", features = ["formatting", "macros", "parsing"] }
 sha2 = "0.10"
 rayon = "1"
 

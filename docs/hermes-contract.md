@@ -1,334 +1,190 @@
 # Hermes 集成契约
 
-> 本文是软件与 Hermes 之间的**接口规范**。改动这里必须同步改实现与契约测试。
-> 实测依据见本文末「实测事实」（Hermes v0.22.5，2026-10-27）。
+> 同步于 2026-11-04。本文区分 **当前 H1 文本分析与项目对话** 和 **后续 H2/H3 设计**。
+> 历史实测依据见文末及 [m3-probe-findings.md](m3-probe-findings.md)。契约变更必须同步实现和测试。
 
-## 0. 原则
+## 0. 原则与当前范围
 
-1. **可选**：Hermes 缺席时，软件功能完好；AI 入口置灰并说明原因。
-2. **只读优先**：AI 在软件里能"看"，但落盘一律由软件执行（ADR-004）。
-3. **薄适配**：Adapter 只做「组装 → 启动 → 解析 → 回推」，不含任何 VASP 业务逻辑。
-4. **可探测**：启动时探测能力，不假设版本。
+1. **可选**：Hermes 缺席不应影响扫描、结构和属性查看。
+2. **当前无文件/终端工具面**：任务分析 CLI 注入任务事实；项目对话 UI 发送用户原始消息。二者都不直接写用户文件。
+3. **薄适配**：适配器只负责组装、启动、解析和回传，不另写 VASP 领域判断。
+4. **宿主负责超时**：已实测 `--run-budget` 不能用于当前集成，Windows 下由宿主通过 `taskkill /T /F` 结束 Hermes 进程树，不能只结束 `.cmd` 外层。
+5. **H2/H3 不计入当前完成度**：插件工具、专用 profile 和 ACP 仍是后续设计。H1 自由对话与会话续接已通过真实 Electron + 真实模型两轮验收。
 
----
+本轮经用户明确授权执行了两轮真实 Hermes 自由对话；固定任务 `analyze` 未单独发起真实付费请求。其余结论来自 CLI、真实可执行文件探测和真实 Electron 的离线 mock 验证。
 
-## 1. 定位与探测
+## 1. 可执行文件与环境
 
-### 1.1 可执行文件
+### 1.1 当前路径解析
 
-按顺序尝试，第一个通过 `--version` 的即采用：
+Electron Main 启动时：
 
-1. 用户配置的绝对路径（`store.json → hermes.path`）
-2. `hermes.exe`（Windows 原生入口，优先于 shim）
-3. `hermes.cmd` / `hermes.bat`
-4. `hermes`（PATH 中的 shebang 脚本，需 `shell: true`）
+1. 尝试 `%LOCALAPPDATA%/hermes/hermes-agent/.hermes/bin/hermes.exe`；
+2. 尝试同目录 `hermes.cmd`；
+3. 都找不到则退回 `hermes`，由 PATH 解析；
+4. 若未显式设置，则把结果写入 `HERMES_BIN`，供 Rust 子进程继承。
 
-> Windows 上 Python console script 通常生成 `hermes.exe`；git-bash 里的 `which hermes` 可能指向无扩展名脚本。Electron `spawn` 不会自动解析 shebang，必须显式处理 `.exe`/`.cmd` 或 `shell: true`。
+`hermes-probe`、`analyze` 和 `hermes-chat` 统一按 `--hermes-bin` → `HERMES_BIN` → PATH 中的 `hermes` 解析。Rust 对裸命令名会搜索 PATH，并在 Windows 补全 `.exe` / `.cmd` / `.bat`；路径含空格、PATH 中的 `.cmd` 和不存在的可执行文件均有 CLI 回归。未安装只降级 AI，不影响查看器。
 
-### 1.2 能力矩阵
+2026-11-04 已通过真实 `vaspcore hermes-probe` 探测到 Hermes `0.22.6+481.gc314285`，并用真实 `chat --help` 核对当前启动参数。适配器的 `supports_stream_json` 仍是固定布尔值，不代表每次启动都完成能力校验。
 
-```
-probe():
-  v = run("--version", timeout=5000)         → 解析 "Hermes Agent vX.Y.Z"
-  h = run("chat --help", timeout=5000)       → 是否含 "--format"
-  s = run("chat --help", timeout=5000)       → 是否含 "--query-file"
-  p = profileExists("dftwork")                → 决定 H1 还是 H2
-```
+### 1.2 尚未实现的探测设计
 
-结果缓存到 `store.json → hermes.capabilities`，附 `probedAt`；版本变化时失效。
+以下能力矩阵属于目标，不是当前功能声明：版本/`--help` 能力缓存、`probedAt`、profile 检测、H1/H2 自动选择和工具面启动校验。当前不能用文档中的矩阵宣称这些能力已落地。
 
-| 能力 | 缺失后果 |
-|---|---|
-| `--format stream-json` | 不支持流式 → 只能等最终文本（仍可用，体验降级） |
-| `--query-file` | 退回 `-q <prompt>`（注意引号与长度限制） |
-| `--resume` | 每轮新建会话（上下文断开） |
-| profile `dftwork` | 退回 **H1 无工具模式**（只喂 Bundle，不给工具） |
+Windows 下需要区分 `.exe`、`.cmd` 与无扩展名 shebang 脚本；Electron/Rust 直接 spawn 时不能假设 Git Bash 的 PATH 和脚本解析行为会自动生效。
 
-### 1.3 profile 准备（H2 模式）
+## 2. 当前 H1 调用
 
-专用 profile `dftwork`，要求：
-
-- `platform_toolsets.cli` 仅含：`vasp`（插件工具集）、`file`（只读子集由插件/配置约束）、`skills`
-- `disabled_toolsets`：`terminal`、`browser`、`web`、`code_execution`、`image_gen`、`messaging`、`cronjob`
-- 不带记忆、不带用户 SOUL（用 `--ignore-rules` 或 profile 内置说明）
-
-启动 AI 前校验一次实际工具面（`hermes --profile dftwork tools list`）。不符合则**禁用 H2**，回退 H1，并在 UI 说明「工具面校验未通过」。
-
----
-
-## 2. 调用命令
-
-### 2.1 首轮（新建或续接命名会话）
+任务分析和自由对话最终都调用：
 
 ```bash
-hermes --profile dftwork chat \
-  --query-file - \
+hermes chat \
+  --query-file <临时文件> \
   --format stream-json \
   --source tool \
   --quiet \
-  --continue "vaspflow:<projectHash>" --create-if-missing \
-  --run-budget 300
+  --max-turns N \
+  --ignore-user-config --ignore-rules \
+  -t todo \
+  --model <模型> --provider <provider> \
+  [--resume <session_id>]
 ```
 
-### 2.2 后续轮（已知 session_id）
+DFTwork 对话入口为 `vaspcore hermes-chat <root> <消息文件>`。Runner 将规范化后的当前扫描 root 设置为 Hermes 子进程 cwd；首次成功回答返回 `session_id`，后续消息用 `--resume` 续接。切换到不同项目 root 时，UI 清空消息和会话 ID，新消息不再携带旧 `--resume`。
 
-```bash
-hermes --profile dftwork chat \
-  --query-file - \
-  --format stream-json \
-  --source tool \
-  --quiet \
-  --resume "<session_id>" \
-  --run-budget 300
-```
+聊天正文与 `session_id` 只保存在 `AiPanel` 的 React 状态中；新对话、切换项目、页面重载和关闭窗口会清空。localStorage 只保存模型名与提供方设置，暂不实现 DFTwork 聊天历史持久化。Hermes 自己的会话存储、续接状态和服务端日志不属于 DFTwork 的控制范围，`--source tool` 只负责会话来源过滤，不表示 Hermes 端零存储。
 
 要点：
 
-- **prompt 走 stdin**（`--query-file -`），不拼命令行：规避引号、反斜杠、长度与编码问题（实测可用，见文末 E6）。
-- `--source tool` 让会话不进入用户的 Hermes 会话列表。
-- `--run-budget` 设墙钟上限，防止挂死；超时由 Adapter 记 `TIMEOUT`。
-- H1 无工具模式时去掉 `--profile`，并加 `--ignore-rules`（不加载用户记忆/SOUL）。
-- 环境变量：`PYTHONUTF8=1`、`PYTHONIOENCODING=utf-8`（Windows 防中文乱码）。
+- 用户消息由 Electron 写入随机命名的临时 UTF-8 文件，调用结束后删除；内核传递消息时也不拼进命令行。临时文件用于单次传参，不是聊天历史；进程异常退出可能留下临时文件；
+- `--ignore-user-config --ignore-rules` 用于隔离用户人格、记忆和技能；模型和提供方在 UI 与 CLI 都必须显式给出；
+- `--source tool` 使集成会话不进入用户的普通 Hermes 会话列表；
+- 对话请求 `-t todo`，DFTwork 不提供文件写入或终端工具；cwd 不等于 Hermes 自动看到了项目文件内容。2026-11-04 实测 `tools list` 即使指定 `-t todo` 仍列出完整静态清单，因此该清单不能作为实际运行工具面的验收证据；
+- 不使用 `--run-budget`；内核默认超时 180 秒，Electron 外层调用超时 300 秒；Windows 超时和坏流清理会结束整个子进程树；
+- API Key 由用户自己的 Hermes 配置提供，DFTwork 不持有或分发 Key。
 
----
-
-## 3. stdout 事件协议
-
-### 3.1 事件类型
+## 3. stdout JSONL 事件协议
 
 | type | 关键字段 | 用途 |
 |---|---|---|
-| `system` (subtype=`init`) | `timestamp` | 计时起点 |
-| `text` | `text` | 增量文本，**需拼接** |
-| `tool_use` | `name`、`tool_call_id`、`input` | 生成工具卡片 |
-| `tool_result` | `name`、`tool_call_id`、`output`、`duration_ms`、`is_error` | 回填卡片 |
-| `result` | `session_id`、`exit_code`、`text`、`tokens{input,output,total,cache_read,cache_write}`、`duration_ms` | 结束、计量 |
+| `system`（`subtype=init`） | `session_id`、`model`、`timestamp` | 初始化信息 |
+| `text` | `text`、`timestamp` | token 级文本片段，必须拼接 |
+| `tool_use` | `name`、`tool_call_id`、`input` | H2 才需要；当前 H1 不主动给工具 |
+| `tool_result` | `name`、`tool_call_id`、`output`、`duration_ms`、`is_error` | H2 工具结果关联 |
+| `result` | `session_id`、`exit_code`、`text`、`tokens`、`duration_ms` | 终止、错误和用量判定 |
 
-### 3.2 解析伪代码
+解析要求：
 
-```ts
-for await (const line of readline(stdout)) {
-  if (!line.startsWith('{')) { logToStderr(line); continue; }   // 容错
-  const evt = safeJsonParse(line);
-  switch (evt.type) {
-    case 'text':        buffer += evt.text; scheduleFlush(100 /*ms*/); break;
-    case 'tool_use':    emit({ kind: 'tool', id: evt.tool_call_id, name: evt.name, input: evt.input }); break;
-    case 'tool_result': emit({ kind: 'tool-result', id: evt.tool_call_id, ok: !evt.is_error, ms: evt.duration_ms, output: truncate(evt.output, 32_000) }); break;
-    case 'result':      finish(evt); break;         // 保存 session_id / tokens
-  }
-}
+1. stdout 与 stderr 分开处理；历史实测 stdout 为 JSONL，`Session:` 等日志在 stderr。当前 Runner 丢弃 stderr，不把其混入 JSONL。
+2. `text` 是大量碎片，必须拼接成一条回答；当前 UI 在命令完成后一次性追加回答，尚未实现 token 流式渲染。
+3. 同时检查 `result.exit_code` 和进程退出状态；模型失败不能因进程正常退出而误报成功，进程失败也不能被 `result.exit_code=0` 掩盖。
+4. 工具结果若在未来启用，应按 `tool_call_id` 关联，而不是按工具名称配对。
+5. 没有 `result`、进程启动失败、超时和非零退出均以失败呈现；非空坏 JSONL 行返回 `EXTERNAL`，不能忽略后伪装成成功。
+
+## 4. 任务事实与 Prompt
+
+`analyze` 保留“DFTwork 收集事实，Hermes 只解释事实”的固定分析方向：
+
+```text
+scan / convergence / scf / vibrations / forces / magnetization 等 JSON
+  → 组装任务事实与用户 intent
+  → hermes chat
+  → 结论、证据、建议、缺数据
 ```
 
-### 3.3 已知坑
+项目对话 `hermes-chat` 不套用上述固定问题，也不自动附加任务事实，而是原样传递用户消息。由于当前没有文件读取工具，Hermes 的 cwd 虽为项目 root，但不会因此自动看到 OUTCAR、INCAR 等文件内容；需要项目数据时必须由后续受控上下文或 H2 工具显式提供。
 
-| 坑 | 处理 |
-|---|---|
-| `text` 是逐 token 碎片 | 累积后按 100ms 节流渲染，不要一块一条消息 |
-| `Session:` / `session_id:` 在 **stderr** | 不参与解析；写入调试日志，可作为 session_id 的兜底来源 |
-| 进程可能先退出后仍有缓冲 | 以 `result` 事件为准；没有 `result` 则按退出码判定 |
-| `tool_result.output` 可能很大 | 截断到 32KB，完整内容落 `%APPDATA%/DFTwork/logs/tools/` |
-| 同一 `name` 并行多次调用 | 用 `tool_call_id` 关联，不要按名字配对 |
+固定分析的 prompt 应继续遵守：
 
----
+- 只依据提供的事实，不编造缺失数据；
+- 结论引用具体字段或输入证据；
+- 建议不得声称已经执行；
+- 输出简体中文，并区分观察、推测与建议。
 
-## 4. 会话管理
+早期 `AnalysisBundle v1` 的 12 KB 上限、首 50 + 末 150 点、excerpt ≤ 400 字符、`missing`/`limits` 字段和会话轮转表属于目标契约，**不能在没有序列化与契约测试佐证时视为全部已实现**。补齐时应为大小、裁剪和缺数据行为增加固定夹具。
 
-- **会话键**：`vaspflow:<projectHash>`，`projectHash = sha1(realpath.toLowerCase()).slice(0, 12)`。
-- **落盘**：`store.json → sessions[projectHash] = { sessionId, lastUsedAt, turns, totalTokens }`。
-- **轮转**：满足任一条件即开新会话（命名 `vaspflow:<hash>:<n>`）——累计 `tokens.input > 120k`、轮次 > 20、或用户点「新对话」。
-- **隔离**：不同项目不共享会话；同一项目的分析共享上下文（符合"增量处理"习惯）。
+## 5. H2 工具面：目标设计
 
----
+H2 计划使用专用 `dftwork` profile 和 Hermes 插件，把只读/提案工具转调同一个 `vaspcore.exe`：
 
-## 5. AnalysisBundle（软件 → AI 的事实包）
-
-### 5.1 Schema v1
-
-```json
-{
-  "schemaVersion": 1,
-  "generatedAt": "2026-10-27T16:40:00+08:00",
-  "project": { "root": "D:/projects/my-vasp-project", "taskCount": 42 },
-  "task": {
-    "relPath": "relax/step-01",
-    "taskType": { "code": "relax", "label": "结构优化" },
-    "status": { "code": "ERROR_DETECTED", "label": "运行出错", "reason": "OUTCAR 含致命错误", "observedAt": "..." },
-    "evidence": [
-      { "ruleId": "zbr", "file": "OUTCAR", "severity": "error",
-        "message": "ZBRENT: fatal error in bracketing", "excerpt": "…（≤400 字符）" }
-    ]
-  },
-  "inputs": {
-    "incar": { "ENCUT": 400, "EDIFF": 1e-5, "ISIF": 2, "ISPIN": 1, "MAGMOM": [0, 0] },
-    "kpoints": { "scheme": "Gamma", "grid": [1, 1, 1] },
-    "potcar": { "elements": ["Si"], "orderMatchesPoscar": true },
-    "poscar": { "formula": "Si", "natoms": 8, "latticeConsts": [5.43, 5.43, 5.43] }
-  },
-  "ionic": {
-    "nSteps": 12,
-    "truncated": false,
-    "points": [{ "step": 1, "energy": -123.456, "fmax": 0.82 }]
-  },
-  "checks": { "inputCheck": { "code": "PASS", "evidence": [] } },
-  "files": [{ "name": "OUTCAR", "size": 1234567, "mtime": "..." }],
-  "missing": ["无 CONTCAR", "OSZICAR 仅 3 行"],
-  "limits": { "maxPointsPerSeries": 200, "maxExcerptChars": 400 }
-}
-```
-
-### 5.2 序列化规则
-
-1. **只放结论性数据**，不放原始文件内容（不塞 OUTCAR）。
-2. 序列点数 > 200：保留首 50 + 末 150，置 `truncated: true`。
-3. 每条 `excerpt` ≤ 400 字符，超出用 `…` 截断。
-4. 总大小硬上限 **12 KB**；超出时按 `files → evidence.excerpt → ionic.points` 顺序裁剪，并在 `missing` 里记 `"因体积裁剪：…"`。
-5. 时间一律 ISO 8601 带时区。
-6. 数值用原始精度，不做四舍五入（保留真实读数）。
-
----
-
-## 6. Prompt 模板
-
-存放于 `crates/vasp-domain/prompts/analyze.md`，随内核版本化。
-
-```
-你是 VASP 计算诊断助手，服务于 DFTwork 桌面软件。
-
-规则：
-1. 只依据 <facts> 中的事实下结论。facts 里没有的数据，明确写「缺数据：<项>」，不要推测。
-2. 每条结论必须引用字段路径，例如 ionic.points[-1].fmax。
-3. 禁止「活性更好/性能更优」这类空泛比较。涉及机理必须给出具体化学原因
-   （键能差异、限速步骤是哪个键断裂、多出的反应步骤、配位竞争等）。
-4. 可以给下一步操作建议，但只能以「建议」措辞，不得声称已执行。
-5. 输出简体中文，结构固定：结论 → 证据 → 建议 → 缺数据。
-
-<facts>
-{{BUNDLE_JSON}}
-</facts>
-
-用户诉求：{{INTENT}}
-```
-
-`INTENT` 枚举：`why_not_converged`、`explain_error`、`review_inputs`、`next_steps`、`freeform`。
-
----
-
-## 7. 工具映射（H2 模式）
-
-Hermes 插件 `plugins/hermes-vaspflow/` 注册以下工具，handler 统一 shell out 到：
-
-```bash
-<coreDir>/vaspcore.exe <subcommand> --json
-```
-
-| Hermes 工具 | core 调用 | 面 | 备注 |
-|---|---|---|---|
-| `vasp_scan` | `scanProject(root)` | 只读 | 限制 `maxDepth`，防误扫全盘 |
-| `vasp_inspect_tasks` | `inspectTaskStatus` / `TaskStore` | 只读 | |
-| `vasp_convergence` | `parseConvergence(taskDir)` | 只读 | 返回点数上限 500 |
-| `vasp_structure_scene` | `getStructureScene(file)` | 只读 | 输出 ≤ 200KB |
-| `vasp_task_files` | `listFilesAndDirs` / `listStructureFiles` | 只读 | |
-| `vasp_read_file` | `readTextPreview(file)` | 只读 | 500KB 截断 |
-| `vasp_discover_inputs` | `srcInspect(root)` | 只读 | |
-| `vasp_scan_templates` | `scanTemplates(root)` | 只读 | |
-| `vasp_check_inputs` | `checkInputs(dirs, profile)` | 只读 | 只校验，不改文件 |
-| `vasp_build_inputs` | `planOneTask`（纯）→ `ProposeBuild` | **提案** | 只返回 BuildPlan，**永不落盘** |
-| `vasp_say` / `vasp_done` | — | 输出协议 | 首版不实现；用普通 text 事件替代 |
-
-**强制约束**：插件的 `vasp_build_inputs` handler 只调用 `ProposeBuild`（内部是纯函数 `planOneTask`），不存在 apply 入口；落盘只能由软件 UI 的 `ApproveBuild` 用例触发。
-
----
-
-## 8. BuildPlan 与放行
-
-### 8.1 Schema
-
-```json
-{
-  "schemaVersion": 1,
-  "planHash": "sha256:…",
-  "createdAt": "...",
-  "projectRoot": "D:/project/…",
-  "source": "ai",
-  "items": [
-    { "path": "relax/step-01/INCAR", "action": "overwrite", "existedBefore": true,
-      "contentSha256": "…", "content": "…", "reason": "ENCUT 由 300 提到 400" }
-  ],
-  "warnings": ["POTCAR 元素顺序与 POSCAR 不一致"],
-  "requires": ["覆盖 3 个已存在文件"]
-}
-```
-
-### 8.2 规则
-
-1. `planHash = sha256(规范化 JSON，去除 planHash 字段)`；放行时重算比对，不一致即拒绝。
-2. 所有 `path` 必须是项目根内的相对路径；`..`、绝对路径、符号链接指向根外——一律拒绝。
-3. 写前备份：内容寻址（`blobs/<sha256前16>`），只备份覆盖项，默认排除 POTCAR/WAVECAR；细则见 [ADR-009](decisions.md#adr-009-备份用内容寻址--保留上限不做逐文件时间戳目录)。
-4. 默认不覆盖：`existedBefore: true` 的项需要用户在 diff 面板逐项勾选。
-5. 落盘后写回执：`<项目根>/.dftwork/receipts/<时间戳>.json`（保留最近 100 条），含计划哈希、文件清单、备份批次、时间。
-
----
-
-## 9. 错误码与降级
-
-| code | 触发 | UI 行为 |
+| 工具类别 | 例子 | 约束 |
 |---|---|---|
-| `HERMES_NOT_FOUND` | 探测全部失败 | AI 区显示「未检测到 Hermes」+ 设置入口 |
-| `HERMES_INCOMPATIBLE` | 无 `--format` 且版本过低 | 提示升级；提供"等最终文本"的降级模式 |
-| `PROFILE_MISSING` | `dftwork` 不存在 | 回退 H1 无工具模式，提示可安装插件 |
-| `TOOL_SURFACE_VIOLATION` | 校验到 terminal/browser 等 | 禁用 H2，回退 H1，给出修复指引 |
-| `SPAWN_FAILED` | ENOENT/EACCES | 显示系统错误原文 |
-| `TIMEOUT` | 超过 `--run-budget` | 可重试；显示已产生的部分内容 |
-| `NONZERO_EXIT` | `exit_code != 0` | 展示 stderr 尾部 20 行 |
-| `STREAM_PARSE` | 坏行 > 5 条 | 降级为纯文本拼接，不中断 |
+| 只读 | `vasp_scan`、`vasp_convergence`、`vasp_structure_scene`、`vasp_read_file` | 限制 root、深度和输出大小 |
+| 输入检查/发现 | `vasp_check_inputs`、`vasp_discover_inputs`、`vasp_scan_templates` | 对应 core 能力实现后再开放 |
+| 提案 | `vasp_build_inputs` | 只返回 BuildPlan，不提供 apply 入口 |
+| 禁止 | `terminal`、`write_file`、`patch`、浏览器/代码执行等默认工具 | 通过实际工具面校验，不靠 prompt 自觉 |
 
-所有错误只影响当前这次分析，**不影响查看器**。
+`-t/--toolsets` 已实测不是可靠白名单。H2 启用前必须验证专用 profile 对 CLI 子进程确实生效，并用能反映最终运行配置的接口检查工具面；不满足时只能回退 H1。当前版本的 `tools list` 会显示静态完整清单，不能单凭它验证 `-t` 已限制实际运行工具。
 
----
+`read_file` 的 cwd 边界、并发写 Hermes `state.db`、插件如何绑定 core 绝对路径等仍需最小实测，不应凭印象实现。
 
-## 10. 契约测试（CI 可跑）
+## 6. BuildPlan 与 AI 的边界
 
-| # | 用例 | 断言 |
+目标原则不变：AI 可以生成变更提案，但落盘必须经过软件 UI 的 diff 和用户放行，AI 工具面不得直接暴露 apply。
+
+P0 已落地 root 与前像绑定、全量预检、原子写、回滚后像校验、pending/回执找回、恢复 journal、备份保留和真实 UI apply→rollback 验收。软件侧 `build` 会保存 pending 计划，但仍不修改业务文件；apply 只允许由用户在软件界面放行。因而：
+
+- H1 仍不让 AI 调用构建或写文件，自由对话也不会自动附带项目文件内容；
+- P0 完成只是 H2 提案面的前置条件，不代表 Hermes 插件、profile 工具面白名单或启动校验已经实现；
+- ADR-009 的 pending、回执和备份保留已经在软件主流程实现，但不是 Hermes 直接可调用的工具；
+- AI 不得直接调用 apply；H2 若开放 `vasp_build_inputs`，仍须只产出提案并交给软件 UI 放行。
+
+详细写入验收见 [roadmap.md](roadmap.md) P0。
+
+## 7. 错误与降级
+
+目标错误分类：
+
+| code | 含义 | 期望行为 |
 |---|---|---|
-| T1 | `hermes --version` | 能解析出 `vX.Y.Z`，5 秒内返回 |
-| T2 | 固定 prompt「回答 OK」+ `--format stream-json` | 至少出现 `system`、`text`、`result`；`result.session_id` 非空 |
-| T3 | 同 session 连续两次 | 第二次 `tokens.input` > 第一次（历史被加载） |
-| T4 | `--query-file -` 传中文 | 正常返回，无乱码 |
-| T5 | 无 profile 时 | 走 H1，且 `PROFILE_MISSING` 被正确上报 |
-| T6 | 不存在的可执行路径 | `HERMES_NOT_FOUND`，不抛未捕获异常 |
-| T7 | `--run-budget 1` | 在 ~1–2 秒内结束，上报 `TIMEOUT` 或 `NONZERO_EXIT` |
-| T8 | 工具面校验 | `dftwork` profile 下不含 `terminal`/`browser` |
+| `HERMES_NOT_FOUND` | 可执行文件不可用 | 仅禁用 AI，说明路径原因 |
+| `HERMES_INCOMPATIBLE` | 必需参数或协议不支持 | 回退或提示升级 |
+| `PROFILE_MISSING` | H2 profile 不存在 | 回退 H1 |
+| `TOOL_SURFACE_VIOLATION` | 实际工具面越界 | 禁止 H2 |
+| `SPAWN_FAILED` | 无法启动进程 | 显示系统错误 |
+| `TIMEOUT` | 宿主超时 | 终止当前分析，可重试 |
+| `NONZERO_EXIT` | 进程或 result 报告失败 | 保留错误文本与日志 |
+| `STREAM_PARSE` | JSONL 解析失败 | 记录坏行并按契约降级 |
 
-> T7 的实际表现待实测（见 `roadmap.md §4`），测完把结论写进本文末「实测事实」。
+通用 CLI 的成功与失败信封已统一到 stdout，Electron 保留原始应用错误码。上表中的 Hermes 专用错误码仍是目标：当前探测缺席以 `found=false` 返回，启动失败使用 `EXTERNAL`，超时和模型错误由 `AnalysisReport` 的 `timed_out` / `exit_code` 表达。
 
----
+## 8. 契约测试
 
-## 11. 二期：ACP 接入点
+本轮离线验证已覆盖：
 
-当需要以下能力时，把 Adapter 的 `transport` 从 `cli` 切到 `acp`：
+1. 自定义 `HERMES_BIN`、路径含空格、PATH 中 `.cmd` 回退和未安装降级；
+2. 中文原始消息、项目 cwd、`session_id` 回传与下一轮 `--resume`；
+3. 真实 Electron 对话框连续发送、项目 A→B 后 cwd 更新且旧会话不续接；
+4. IPC Zod 非法输入拒绝，以及 CLI `CONFLICT` / `VALIDATION` / `NOT_FOUND` 错误码保留；
+5. mock `result` 的 tokens、耗时和会话字段展示；
+6. 多 `text` 碎片拼接、坏 JSONL 拒绝、进程退出与 `result.exit_code` 不一致，以及 Windows 进程树超时清理。11 项 CLI 契约测试全部通过，修复前已复现对应失败。
 
-- AI 直接执行 shell / 写文件，且需要**逐次审批弹窗**
-- 会话 fork（同一任务试两种方案）
-- 中途 cancel（用户点"停"立即中断）
+上述第 2–5 项的真实 Electron + Rust + mock Hermes 路径由 `apps/desktop/tests/hermes-chat.e2e.cjs` 永久覆盖，并纳入 `pnpm test:desktop`；不会调用真实模型。
 
-接入面：`HermesAdapter.analyze()` 保持不变，只替换内部实现（`cli-transport` → `acp-transport`）。ACP 的 `permission` 请求映射到软件的放行对话框，语义与 BuildPlan 放行一致。
+2026-11-04 经用户授权，使用真实 Electron 生产主入口、React 页面、Rust 内核和 Hermes 0.22.6 执行两轮最小中文对话，cwd 显示为临时扫描项目 root。第一轮返回 `DFT-731`，3985 tokens / 11.4 秒；第二轮通过 `--resume` 续接并正确返回该标记，4018 tokens / 9.3 秒。页面重载后聊天标记消失，localStorage 只有模型名和提供方两个设置。该真实付费验收的临时驱动已删除，与上述永久离线 mock 回归分开记录。
 
-届时 ADR-004 需要更新：允许 AI 直接写，但仍须逐次放行。
+另用不存在的 provider 做了真实可执行文件的失败协议检查，未请求有效模型；Hermes 0.22.6 返回 `result.exit_code=1`，但文本是泛化的中断提示。DFTwork 保留非零失败状态，不能把这种结果当作可用对话。
 
-## 实测事实
+固定任务 `analyze` 的真实付费调用未单独执行。H2 仍需增加 profile 工具面、只读 root 边界、提案不修改业务文件和 core 绝对路径测试；静态 `tools list` 不能替代实际工具面验收。
 
-> Hermes v0.22.5，2026-10-27 在本机实测。
+## 9. H3 / ACP 后续接入点
 
-契约里凡是「Hermes 会怎样」的判断，依据都在这一节。**未在此列出的一律当未知，不要凭印象写代码。**
+只有在确实需要 AI 直接执行危险操作并逐次请求权限、会话 fork 或即时 cancel 时，才评估 ACP。适配器业务接口可以保持稳定，但任何“允许 AI 直接写”的变化都必须新增 ADR，并继续满足软件侧计划、放行和写入安全约束。
 
-| # | 事实 | 怎么测的 | 对设计的影响 |
-|---|---|---|---|
-| E1 | `stdout` 是纯 JSONL，`Session:` 只出现在 `stderr`（此前误判过一次，已更正） | `hermes chat -q ... 2>&1` 与分流两条命令对比 | 必须分两个管道读；失败时先看是不是把 stderr 并进来了 |
-| E2 | 事件序列 `system/init` → `tool_use` → `tool_result` → `text…` → `result`；首事件约 3.1 s | 一次真实调用计时 | UI 要给 3 秒以上的「分析中」反馈 |
-| E3 | `-t file` **不是白名单**，`browser_*` 仍可见可调 | 用 `-t file` 跑一轮并列出工具调用 | 工具面隔离只能靠 profile（ADR-008） |
-| E4 | 一次性调用（`-q`）遇危险命令默认 **deny**，不挂起等待 | 读 `tools/approval_context.py`：`_binary_approval_mode` 默认 deny，`single_query_mode` 决定是否询问 | 不能指望 Hermes 原生审批；落盘必须由软件执行（ADR-004） |
-| E5 | `--resume <session_id>` 可命中同一会话 | 两次调用比对 session_id | 多轮分析可行 |
-| E6 | `--query-file -` 从 stdin 读 prompt，中文无乱码，约 2.7 s 返回 | 管道传中文 prompt | 不必写临时文件，避免留垃圾 |
-| E7 | `result` 事件自带 `session_id` 与 token 用量 | 看 `result` 字段 | 不用另建会话表 |
+## 10. 历史实测事实
 
-> 还有 5 个未验证项，见 [roadmap.md §4](roadmap.md)：`read_file` 的 cwd 边界、profile 级 `platform_toolsets` 对 CLI 子进程是否生效、并发写 `state.db` 的互斥性、`--run-budget` 中断后的事件形态、Hermes 插件如何绑定 `vaspcore.exe` 绝对路径。
+> Hermes v0.22.5 于 2026-10-27 实测；补充记录见 [m3-probe-findings.md](m3-probe-findings.md)（2026-10-28）。这些是有日期的证据，不表示本轮重新运行。
+
+| # | 事实 | 对设计的影响 |
+|---|---|---|
+| E1 | stdout 是纯 JSONL，`Session:` 在 stderr | 分管读取，失败时检查是否错误合流 |
+| E2 | 可见 `system/init → tool_use/tool_result → text… → result`；当时首事件约 3.1 秒 | UI 需要明确的分析中状态 |
+| E3 | `-t file` 不是白名单，仍可能看到其他工具 | H2 必须验证实际工具面 |
+| E4 | 一次性调用遇危险命令默认 deny，不等待人工批准 | 不依赖 Hermes 原生审批实现软件放行 |
+| E5 | `--resume <session_id>` 当时可命中同一会话 | 续接技术上可行，但当前主流程未完成 |
+| E6 | `--query-file -` 当时可从 stdin 读取中文 prompt | 避免命令行拼接与临时 prompt 泄漏 |
+| E7 | `result` 带 `session_id` 和 tokens | 用量与错误以 result 为依据 |
+| E8 | `--run-budget` 虽在 help 中，实际运行被拒绝 | 宿主必须负责超时 |
+| E9 | `--ignore-user-config --ignore-rules` 必须显式给模型和 provider | 启动参数需成组校验 |
+| E10 | 默认 profile 会加载用户 SOUL、记忆、技能和宽工具面 | H1 默认隔离用户配置，H2 另行收敛 |

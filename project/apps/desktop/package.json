@@ -9,6 +9,8 @@
     "build": "electron-vite build",
     "start": "electron-vite preview",
     "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json",
+    "test:e2e": "node --test --test-concurrency=1 tests/desktop.test.cjs",
+    "test": "electron-vite build && pnpm test:e2e",
     "package": "electron-vite build && electron-builder --win"
   },
   "dependencies": {
@@ -18,18 +20,18 @@
     "react-dom": "^18.3.1",
     "recharts": "^2.13.3",
     "three": "^0.170.0",
-    "zod": "^3.23.8"
+    "zod": "^4.6.7"
   },
   "devDependencies": {
     "@types/node": "^22.9.0",
     "@types/react": "^18.3.12",
     "@types/react-dom": "^18.3.1",
     "@types/three": "^0.170.0",
-    "@vitejs/plugin-react": "^4.3.3",
-    "electron": "^33.2.0",
-    "electron-builder": "^25.1.8",
-    "electron-vite": "^2.3.0",
+    "@vitejs/plugin-react": "^6.2.1",
+    "electron": "42.11.16",
+    "electron-builder": "^26.18.0",
+    "electron-vite": "^6.0.0",
     "typescript": "^5.6.3",
-    "vite": "^5.4.11"
+    "vite": "^8.3.5"
   }
 }

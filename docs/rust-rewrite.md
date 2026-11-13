@@ -1,165 +1,142 @@
-# Rust 内核重写方案
+# Rust 内核实现与对拍
 
-> 决定（ADR-010）：外壳 **Electron**，前端 **React 不重写**，内核 **Rust 重写**，原 JS 代码只作行为参考。
-> 本文定：怎么组织 Rust 工程、怎么集成进 Electron、怎么保证行为不变、工期与风险。
+> 决策见 ADR-010：外壳 Electron，前端保留 React，内核使用 Rust，原 JS 只作行为参考。
+> 本文同步于 2026-11-06，记录当前工程形状、对拍基线和仍需遵守的行为规格；修复优先级见 [roadmap.md](roadmap.md)。
 
-## 1. 一句话方案
+## 1. 当前工程形状
 
-**Rust workspace 产出 4 个 crate，编译出一个 `vaspcore.exe`；Electron 主进程 spawn 它、用 JSON 通信。原 JS 代码移入 `reference/`（只读、不参与构建），只用于对拍与查阅。**
+Rust workspace 位于 `project/`，由四个 crate 组成并产出一个 `vaspcore.exe`：
 
-```
-Electron 主进程 ──spawn──> vaspcore.exe ──JSON──> D:/project/.../OUTCAR
-      ↑ 前端 React（不变）              ↑ Hermes 插件也调它
-```
-
-## 2. 为什么先做 CLI，不做 napi 原生模块
-
-| 方式 | 优点 | 代价 | 结论 |
-|---|---|---|---|
-| **独立二进制 + JSON CLI** | 崩溃隔离（Rust 挂了不拖垮 Electron）；调试简单（命令行可直接跑）；Electron 升级不用重编；Hermes 插件与测试共用 | 每次调用约 5–20 ms 进程开销 | **首版采用** |
-| napi-rs 原生模块 | 零进程开销、零序列化 | 绑定 Electron 的 Node ABI，升级要重编；Rust panic 可能带崩主进程；调试链路长 | 二期可选 |
-
-进程开销相对于「读几十 MB OUTCAR」可以忽略；而崩溃隔离对科研软件是硬需求。
-
-## 3. Workspace 划分
-
-```
+```text
 crates/
-├── vasp-domain/           # 纯逻辑：解析、判定、规则、计划生成。不读文件
-├── vasp-application/      # 用例编排：扫描、查看、检查、构建、分析
-├── vasp-infrastructure/   # 实现 domain 定义的 trait：文件、存储、Hermes 子进程、日志
-└── vasp-cli/              # 二进制入口（clap）：解析参数 → 调用例 → 输出 JSON
+├── vasp-domain/           模型、解析、状态、几何、构建策略与领域端口
+├── vasp-application/      用例编排、DTO、AppError 与 Fs 端口
+├── vasp-infrastructure/   LocalFs、Hermes、日志和时钟等适配器
+└── vasp-cli/              clap 参数、组合与分发、JSON 边界
 ```
 
-依赖方向由 **Cargo 强制**（不是约定）：
+真实依赖方向：
 
-- `vasp-domain`：Cargo.toml 里不写任何内部依赖 → 物理上无法引用上层。
-- `vasp-application`：只依赖 `vasp-domain`。
-- `vasp-infrastructure`：只依赖 `vasp-domain`（实现它的 trait）。
-- `vasp-cli`：依赖三者，是唯一的**组合根**（把所有实现装配起来）。
+- `vasp-domain` 不依赖其他内部 crate；
+- `vasp-application` 依赖 `vasp-domain`；
+- `vasp-infrastructure` **同时依赖 `vasp-application` 和 `vasp-domain`**，因为它既要实现 application 声明的 `Fs`，也要实现 domain 的 `Clock` / `Logger` / `Hermes` 等端口；
+- `vasp-cli` 依赖前三者。
 
-这比 JS 版的 dependency-cruiser 更硬：写错 Cargo.toml 就编译不过。
+这仍由 Cargo 在编译期强制，但不能再沿用早期“infrastructure 只依赖 domain”的描述。
 
-## 4. 依赖库
+## 2. Electron 集成
 
-| 用途 | crate | 说明 |
-|---|---|---|
-| 序列化 | `serde` + `serde_json` | CLI 输出、配置、快照 |
-| 错误 | `thiserror`（库内）、`anyhow`（CLI 边界） | 领域错误用枚举，入口处统一转 JSON |
-| 目录遍历 | `walkdir` 或 `ignore` | 后者自带跳过规则（.git / node_modules） |
-| 并行 | `rayon` | 扫描多个目录并行；**不引入 tokio**，同步并行足够 |
-| 正则 | `regex` | OUTCAR / OSZICAR 行匹配 |
-| 参数 | `clap` 4 | 子命令：scan / convergence / scene / files / read / build / check / discover |
-| 日志 | `tracing` + `tracing-subscriber` | 写文件日志，stderr 输出 |
-| 时间 | `time`（或 `chrono`） | 时间戳与 ISO 8601 |
-| 哈希 | `sha2` | 计划指纹、内容寻址备份 |
-| 测试 | `assert_cmd` + `insta`（快照） | CLI 端到端 + JSON 快照 |
-| 基准 | `criterion`（可选） | 解析性能回归 |
+采用独立二进制 + JSON CLI，不使用 napi：
 
-release 配置：`lto = "thin"`、`strip = true`、`panic = "abort"` → 单二进制约 **3–6 MB**。
-
-## 5. 模块对照（原 JS → Rust）
-
-| 原 JS（`reference/lib/host/`） | Rust 目标 | 说明 |
-|---|---|---|
-| `scanner.js`（631 行） | `domain/scan/detect.rs` + `infrastructure/fs/walker.rs` | 遍历与判定分开 |
-| `parser.js`（185 行） | `domain/convergence.rs` | 文本入参，纯函数 |
-| `structure.js`（562 行） | `domain/structure/{parse,bonds,scene}.rs` | 成键算法单独模块 + 夹具 |
-| `input-builder.js`（585 行） | `domain/build/{poscar,incar,plan}.rs` | 只产计划，不写盘 |
-| `input-checker.js`（365 行） | `domain/validate.rs` | 规则表 + 校验 |
-| `incar-validate.js` / `outcar-parse.js` | `domain/{incar,outcar}.rs` | 纯函数 |
-| `task-store.js`（228 行） | `domain/index.rs` + `infrastructure/store.rs` | 内存索引 / 持久化分开 |
-| `task-files.js` / `scan-templates.js` / `src-inspect.js` | `domain/fs_view.rs` / `domain/templates.rs` / `domain/discovery.rs` | |
-| `index.js` 的 12 个工具 | `application/use_cases/*.rs` + `cli/commands/*.rs` | 工具 = 用例的 CLI 出口 |
-| `src/client/*`（React） | **不改**，只改 `api.ts` 的调用方式 | 前端保留 |
-
-## 6. 对拍：保证「重写后行为不变」
-
-这是整个工程的安全网，不能省。
-
-```
-reference/                    # 原 JS 代码（只读，不参与构建）
-tests/
-├── fixtures/                 # 真实项目子集 + 合成用例（POSCAR/OSZICAR/OUTCAR/INCAR）
-├── golden/                   # 用 Node 跑原实现生成的 JSON 快照
-└── parity.rs                 # Rust 跑同一 fixture，逐字段比对 golden
+```text
+Renderer → contextBridge → Electron Main → spawn vaspcore.exe → JSON
 ```
 
-流程：
+优点是崩溃隔离、命令行可独立调试、Electron 升级不要求重编原生模块，Hermes 与测试也可复用同一二进制。代价是每次调用的进程启动和 JSON 序列化开销。
 
-1. `scripts/gen-golden.mjs <项目根目录>`（Node）调用原 JS 函数，对每个**真实任务目录**生成 JSON，写入 `tests/golden/`。样例数据不进仓库，使用时指向本机目录。
-2. `cargo test --test parity` 读取同一 fixture，生成本地 JSON，与 golden 逐字段比对。
-3. 差异分三类处理：Rust 的 bug（修 Rust）；原实现的 bug（记录到本文 §11.4，并在 golden 里标注 `known_divergence`）；字段顺序/浮点格式（规范化后比较）。
-4. CI 里 golden 更新必须人工 review，防止「用错误覆盖正确」。
+当前约定：
 
-## 7. 工期
+- 除 help/version 外，成功和失败都在 stdout 输出一行 JSON 信封，stderr 只放日志；
+- Electron 保留原始 `CONFLICT` / `VALIDATION` / `NOT_FOUND` 等错误码；
+- IPC Main 使用 Zod 校验实际请求，非法输入在启动内核前拒绝；
+- IPC 的计划和回执通过临时 JSON、Hermes 消息通过临时 UTF-8 文本传给 CLI，调用结束后删除。
 
-| 阶段 | 内容 | 工期 |
-|---|---|---|
-| R0 | workspace、CLI 骨架、JSON 契约、golden 生成脚本 | 3–4 天 |
-| R1 | domain 解析（POSCAR / OSZICAR / OUTCAR / INCAR / KPOINTS） | 1.5–2 周 |
-| R2 | domain 规则（状态判定、成键、输入校验、计划生成） | 1.5–2 周 |
-| R3 | application 用例 + infrastructure（walker / store / hermes / log） | 1–1.5 周 |
-| R4 | 对拍收口（差异清零或记录）+ 性能调优 | 1 周 |
-| **合计** | | **5.5–7.5 周** |
+## 3. 当前 CLI 能力
 
-比 JS 版 M1（7–10 天）多约 5 周，但换来：单二进制、无 GC、解析快 3–8×、内核与 Electron 完全解耦。
+| 类别 | 子命令 |
+|---|---|
+| 扫描与查看 | `scan`、`convergence`、`scene`、`magnetization`、`scf`、`forces`、`vibrations`、`trajectory`、`compare` |
+| 构建写入 | `build`、`apply`、`rollback` |
+| 项目写入状态 | `project-state`、`discard-plan`、`recover`、`prune-backups` |
+| AI 与系统 | `analyze`、`hermes-chat`、`hermes-probe`、`version` |
 
-## 8. 风险与缓解
+早期规划中的 `files` / `read` / `check` / `discover` 等并未全部形成可用 CLI；`pending.rs` 和 `services/stubs.rs` 中的占位不能计为完成。
 
-| 风险 | 影响 | 缓解 |
-|---|---|---|
-| 行为漂移（最可能） | 曲线/状态与旧版不一致 | 对拍 + golden 快照 + 真实项目全量比对 |
-| 成键算法（`structure.js` 385 行纯逻辑） | 3D 结构画错 | 单独夹具：多种晶格、元素、周期边界；与原实现逐原子/逐键比对 |
-| Windows 路径与编码 | 中文路径、CRLF、GBK 文件 | 全程 `PathBuf` + 显式 UTF-8 解码策略；夹具里放中文路径 |
-| 大文件解析 | OUTCAR 几十 MB、XDATCAR GB 级 | 流式读取 + 只读尾部；必要时 mmap |
-| Rust 开发速度 | 首版推迟 | 先做 domain 纯函数（最容易、收益最大）；application 用简单结构，不做过度抽象 |
-| 编译时间 | 迭代变慢 | workspace 增量编译；`cargo check` 为主 |
-| 团队不熟 Rust | 卡住 | 只在不熟悉的地方用最直白写法（避免泛型花活）；CLI 层保持薄 |
+P0 写入安全验收已完成：`build` 只保存 pending 计划，不修改业务文件；apply 在业务写入前持久化 manifest 与恢复 journal，回执和恢复状态可跨进程找回。保留策略、故障注入和真实 Electron apply→rollback 验收见 [roadmap.md](roadmap.md) P0。备份仍不是独立数据备份的替代品；桌面单实例锁已验收，但外部 CLI 或其他进程并发写同一项目仍不受保护。
 
-## 9. 验收
+## 4. 对拍现状
 
-1. `vaspcore scan <真实项目> --json` 与原 JS 实现输出**逐字段一致**（任务数、状态码、路径、INCAR 摘要）。
-2. `cargo test` 全绿，覆盖原 77 项测试对应的行为。
-3. `tests/parity` 在 3 个真实项目 + 20 个合成 fixture 上零差异（或差异全部记录为 `known_divergence`）。
-4. release 二进制 < 8 MB，冷启动 < 50 ms。
-5. Electron 主进程只通过 `vaspcore.exe` 访问内核，`apps/desktop` 不出现任何 Rust 绑定（首版不做 napi）。
+目标流程仍是：
 
-## 10. 与原 JS 的关系
+```text
+reference/VASPFlow + fixture
+        ↓ scripts/gen-golden.mjs
+tests/golden JSON
+        ↓ cargo test --test parity
+Rust 输出与 golden 比较
+```
 
-- **不复制代码**：JS 只作行为参考（算法步骤、边界条件、输出字段）。
-- **保留可运行**：`reference/` 里的 JS 保持可 `node` 运行，用于生成 golden 与排查差异。
-- **不再维护**：修 bug 只改 Rust；如果确认是原实现的 bug，记录到本文 §11.4。
+当前事实（2026-11-04）：
 
-## 11. 行为规格：重写前必须逐条核对的清单
+- `cargo test --workspace` 共 **128 项通过**：81 domain、13 application、2 infrastructure、1 parity、31 个 CLI 集成测试（10 个写入安全 + 8 个持久化/故障注入 + 2 个解析回归 + 11 个契约回归）；
+- parity 使用 3 个入库合成 fixture，`tests/parity-fixtures.json` 显式列出必需输入和 golden，缺少或读取失败会直接失败；
+- `node scripts/gen-golden.mjs` 从旧 JS 实现确定性重建 `tests/golden/reference/`，结果不含时间戳或本机绝对路径；连续重建哈希一致，CI 会检查生成物漂移；
+- 当前逐项比较离子步编号、能量和全部最大力值，覆盖汇总力优先、力矩阵回退与空 OSZICAR；状态、路径、结构、应力等字段仍未对拍；
+- 因而“128 项全绿”不能写成“原 77 项行为全部覆盖”或“全字段对拍零差异已验收”。
 
-原 JS 有 54 个导出符号。下面不是代码清单，是**判据**——每条都要对着 `reference/` 确认答案之后再写 Rust，不能凭直觉。
+### 对拍收敛要求
 
-### 11.1 三类耦合点（原实现的结构问题，重写时消灭）
+1. golden 必须可重建、可审查，并明确哪些夹具是测试必需输入；CI 缺少必需输入时应失败。
+2. golden 更新需要人工 review，不能用新输出自动覆盖正确基准。
+3. 逐步覆盖任务数、状态码、路径、INCAR 摘要、能量、力值、应力和结构等关键字段。
+4. Rust 缺陷应修 Rust；参考实现缺陷应记录 `known_divergence`，包含日期、fixture、两种行为和判断依据。
+5. 对拍不能代替本仓库自己的回归测试；本次发现的写入、解析和契约问题都需要直接新增 Rust/CLI 用例。
 
-| 类型 | 表现 | 处理 |
-|---|---|---|
-| 路径式 API | 约 15 个函数内部自己 `readFile`，无法纯测 | 拆成「文本入参的纯函数」+「application 读文件」 |
-| 模块级可变状态 | `scanner.js` 的 `taskCache`、`input-builder.js` 的 `potcarCache`、`task-store.js` 的 `inputCheck` | 移到 infrastructure，键带 mtime/size；domain 无状态 |
-| DSH 注册 | `registerOutcarParse(ctx)` / `registerIncarValidate(ctx)` | 丢弃；工具改成 CLI 子命令 |
+## 5. 当前验证与未验证项
 
-### 11.2 四个关键函数
+已验证：
 
-| 函数 | 实测 | 为什么关键 | 必须核对的点 |
-|---|---|---|---|
-| `getStructureScene` | 385 行 / 0 IO | 最大块纯逻辑，可直接进 domain | 晶格→笛卡尔的换算顺序；成键判据（共价半径和×容差，还是固定截断？）；跨盒键是否复制 ghost 原子；输出字段（atoms/bonds/cell）的每项含义 |
-| `buildOneTask` | 195 行 / 15 IO | 唯一必须拆「纯计划 + 写盘」的地方 | 哪些输入决定文件内容；POTCAR 按什么顺序拼；INCAR 行内 `;` 的语义；`extraFiles` 来自哪里；`create/overwrite/skip` 怎么判 |
-| `buildPoscarWithSd` | 91 行 / 0 IO | SD 旗标展开规则 | 哪些 flag 触发展开；展开后行序与列序 |
-| `scanSingleDir` | 66 行 / 9 IO | 任务判定标准 | 哪组文件名算一个 VASP 任务；只有 INCAR、没有 OUTCAR 算不算「未开始」；子目录下探深度 |
+- Rust workspace 与桌面/npm 包版本统一为 **0.2.0**，`vaspcore --version` 输出 `vaspcore 0.2.0`；Cargo.lock 与 pnpm-lock.yaml 已同步；
+- `cargo test --workspace --locked`：81 domain + 13 application + 2 infrastructure + 1 parity + 31 CLI 集成测试，共 128 项通过；
+- `cargo check --workspace`：通过，有 2 个原有的未使用代码警告；
+- TypeScript typecheck、Electron 42.11.16 / electron-vite 6.0.0 / Vite 8.3.5 生产构建和真实 Electron 手动切换项目后生成计划通过；桌面单实例双进程验收通过，第二实例退出且首窗口恢复并聚焦；
+- 升级后重新运行 `apps/desktop/tests/` 的 4 组永久 Electron 场景并全部通过：写入恢复/回滚、单实例、四类模拟 IPC 乱序，以及真实 Rust + mock Hermes 的自由对话、cwd、续接、项目切换和 IPC 契约；
+- 生产与全量 `pnpm audit` 均无已知漏洞，限定范围的 minimatch override 已生效；
+- release 内核及 0.2.0 NSIS / portable 构建成功；解包版、定制目录安装版和 portable 均在隔离用户目录完成启动与扫描，包内内核版本及三份许可已核验，测试安装已卸载；
+- 真实 Electron + Rust + Hermes 0.22.6 的两轮中文自由对话通过，第二轮记得第一轮标记，页面显示 tokens 与耗时；重载后聊天清空，仅保留模型/提供方设置；固定任务分析未单独调用真实模型；
+- 扫描、结构、收敛和对比乱序永久回归使用真实生产 React/preload 与可控模拟 IPC，不是真实后端延迟测试；PATH 中 `.cmd`、文本碎片、坏 JSONL、进程退出不一致与进程树超时另有 CLI 回归；
+- 大 OUTCAR 汇总力值、长轨迹完整计数与抽样均有真实 CLI 回归。
 
-### 11.3 必须保留的细节
+本轮未验证：
 
-- 500 KB 预览截断，且不能切在 UTF-8 多字节字符中间。
-- OSZICAR 里 `DAV` / `RMM` 电子步行与离子步行的区分。
-- OUTCAR 能量取哪一组 `free  energy   TOTEN`（第一组还是最后一组，影响收敛曲线）。
-- 三种边界状态的分类：空目录 / 只有输入没输出 / 跑过但 OUTCAR 无正常结束。
-- Windows 中文路径、CRLF、可能的 GBK 编码文件。
+- `cargo clippy`、`cargo audit`；`cargo fmt --all -- --check` 因当前 Rust 工具链缺少 rustfmt 组件而未能执行；
+- release 二进制体积、冷启动时间和相对旧 JS 的性能倍数；
+- 其他干净 Windows 机器的安装与运行、代码签名；
+- 真实付费固定任务 `analyze`、H2 插件工具面和工具面白名单。
 
-### 11.4 已知差异登记
+早期文档中的 release < 8 MB、冷启动 < 50 ms、解析快 3–8× 等仍是性能目标或历史估算，不是本轮实测结论。
 
-重写中发现原实现行为不合预期（即原实现的 bug），**不改 Rust 去迁就**，而是在 `tests/golden/<fixture>.json` 标 `known_divergence: "<理由>"`，并在本节追加一行：日期 / fixture / 原行为 / Rust 行为 / 判断依据。不允许静默 diverging。
+## 6. 仍需遵守的行为规格
+
+这些是从 VASPFlow 重写时必须持续核对的判据，不因主体代码已经存在而取消。
+
+### 6.1 分层与耦合
+
+- 领域解析优先接收文本或纯数据，文件读取留在 application/infrastructure；
+- 不用模块级可变缓存隐藏扫描、构建和输入检查状态；
+- 新能力通过用例与薄 CLI/IPC 出口暴露，不在 Electron 或 Hermes 侧另写一份领域判断；
+- `reference/` 不参与构建，修复产品缺陷只改当前实现，并记录有意的行为差异。
+
+### 6.2 关键函数与文件格式
+
+- 结构：晶格到笛卡尔坐标、Direct/Cartesian scale、周期镜像、成键容差和 ghost 原子必须分别有夹具；
+- 构建：明确 `create` / `overwrite` / `skip`、POTCAR 顺序、INCAR 行内 `;` 和额外文件来源；计划生成与写盘保持分离；
+- 扫描：明确何种目录算任务、只有输入时的状态和最大下探深度；
+- 收敛：区分 OSZICAR 的 `DAV` / `RMM` 电子步行与离子步行，确认 OUTCAR 能量块选择；
+- 力/应力：离子步编号与实际 OUTCAR 块一致，不能只验证数组长度；
+- 轨迹：`total_frames` 必须描述完整输入，抽样覆盖末尾，变胞与 scale 行为有明确输出；
+- 文件预览若后续实现，应保持 500 KB 截断且不切断 UTF-8 多字节字符；
+- Windows 中文路径、空格、CRLF 和可能的非 UTF-8 输入需要集成夹具。
+
+### 6.3 大文件
+
+不能假设 OUTCAR 只需读尾部，频率、磁矩和力等块可能位于中部。需要流式扫描的命令应使用不会受单行非 UTF-8 字节直接打断的读取策略；不能读取的部分必须显式报告，不能返回貌似有效的空结果。
+
+`convergence` 已改为 OSZICAR/OUTCAR 流式扫描，并有超过 64 MiB 的真实 CLI 回归；OUTCAR 只有不存在时才允许空力数组，存在但读取失败会向上传递错误。
+
+## 7. 与参考实现及许可的关系
+
+- `project/reference/VASPFlow/` 只用于查阅和生成对拍基准，不作为产品运行时依赖；
+- 参考实现保持可运行有助于重建 golden，但不承担新功能维护；
+- 上游完整 MIT 许可和 `Copyright (c) 2026 VASPFlow contributors` 已保存到 `project/reference/VASPFlow/LICENSE`，根 `NOTICE` 已记录来源与版权关系；
+- electron-builder 随包携带 DFTwork LICENSE、NOTICE 和 VASPFlow LICENSE；NSIS 定制目录安装版的 `resources/licenses/` 已与源文件逐字核对一致，解包版与 portable 的启动和扫描也已通过。

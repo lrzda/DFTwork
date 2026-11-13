@@ -1,0 +1,13 @@
+DFTwork
+Copyright (c) 2026 lrzda
+
+DFTwork includes software derived from VASPFlow:
+https://github.com/21271122/VASPFlow
+
+VASPFlow
+Copyright (c) 2026 VASPFlow contributors
+Licensed under the MIT License.
+
+The VASPFlow license is preserved in project/reference/VASPFlow/LICENSE.
+Desktop packages include it as resources/licenses/VASPFlow-LICENSE.txt,
+together with the DFTwork license and this notice.

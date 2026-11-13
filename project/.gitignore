@@ -22,6 +22,7 @@ store.json
 .idea/
 .DS_Store
 
-# 对拍产物（由 scripts/gen-golden.mjs 生成，体积大）
+# 外部真实项目的对拍产物；合成夹具 golden 在 reference 子目录纳入版本库
 /tests/golden/*.json
+/tests/golden/local/
 !/tests/golden/.gitkeep

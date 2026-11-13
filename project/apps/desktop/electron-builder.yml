@@ -7,10 +7,10 @@ directories:
   buildResources: build
 
 # 用 pnpm 装好的 Electron 二进制，不走网络下载。
-# 默认行为会去打镜像下 electron-v33.4.11-win32-x64.zip，而 pnpm 的
+# 默认行为会去打镜像下 electron-v42.11.16-win32-x64.zip，而 pnpm 的
 # node_modules 是符号链接结构，electron-builder 找不到就直接联网了；
 # 国内网络下这条路会 404。指到实际 dist 目录最稳。
-electronDist: ../../node_modules/.pnpm/electron@33.4.11_supports-color@7.2.0/node_modules/electron/dist
+electronDist: ../../node_modules/.pnpm/electron@42.11.16_supports-color@7.2.0/node_modules/electron/dist
 
 # 只打构建产物 + package.json。
 # 源码不打进去：out/ 已经是 bundle 后的结果，带源码只会让体积翻倍。
@@ -25,6 +25,12 @@ files:
 extraResources:
   - from: ../../target/release/vaspcore.exe
     to: bin/vaspcore.exe
+  - from: ../../../LICENSE
+    to: licenses/DFTwork-LICENSE.txt
+  - from: ../../../NOTICE
+    to: licenses/NOTICE.txt
+  - from: ../../reference/VASPFlow/LICENSE
+    to: licenses/VASPFlow-LICENSE.txt
 
 win:
   target:

@@ -32,9 +32,9 @@ _Avoid_：构建结果、生成的文件
 用户在一次具体操作中，对**具体计划**点确认。放行是一次性的、绑定了计划哈希的；不是全局开关，不可继承给下一次。
 _Avoid_：同意、允许（"允许"易与 Hermes 的 approvals 混淆）
 
-**会话键（Session Key）**：
-`vaspflow:<项目路径哈希>`。用于把同一项目的多轮 AI 分析续接到同一个 Hermes 会话。
-_Avoid_：会话名、chat id
+**会话 ID（Session ID）**：
+Hermes 在成功回答的 `result.session_id` 中返回的标识，下一条消息通过 `--resume` 续接。DFTwork 只把它和聊天正文保存在当前页面的 React 内存中；新对话、切换项目或页面重载会清空，不实现本地聊天历史持久化。Hermes 自身的会话存储不在 DFTwork 控制范围内。
+_Avoid_：会话名、chat id、会话键（当前未实现项目路径哈希映射）
 
 **只读面（Read Surface）**：
 AI 可自由调用的工具集合：扫描、解析、读文件、校验。不产生任何写入。
@@ -73,21 +73,21 @@ _Avoid_：扫描器（扫描器指基础设施层的 Walker）
 _Avoid_：扫描器、scanner
 
 **PlanWriter**：
-基础设施组件，实现 `FileWriterPort`。**全项目唯一落盘点**：备份 → 写临时文件 → rename → 回执。
+目标架构中 `FileWriter` 端口的实现名称，承担备份、原子写入与回执。当前实际写入由 `ApplyPlan` / `Rollback` 通过 `Fs` 完成，项目级 `BuildStore` 负责 pending、回执、manifest、恢复 journal 与保留策略。
 _Avoid_：写文件函数、output builder
 
 **对拍（Parity Test）**：
-用同一输入同时跑旧实现与新实现，逐字段比对输出的测试方式。拆分 core 时的强制验收手段。
+用同一输入同时跑旧实现与新实现，逐字段比对输出的测试方式。拆分 core 时的强制验收手段；“对拍通过”必须同时说明实际执行的 fixture 和比较字段。
 _Avoid_：回归测试（范围太泛）
 
 **备份批次（Backup Batch）**：
-一次放行对应一个备份目录 `backup/<时间戳>-<planHash 短>/`，内含 `manifest.json` 与该批次用到的 blob。清理以批次为单位。
+一次放行对应 `.dftwork/backup/<时间戳>-<planHash 短>/`，包含 `manifest.json`、内容寻址 blob，以及未提交期间的 `journal.json`；清理以批次为单位并保护恢复中的批次。旧 `backup/...` 回执仍可回滚。
 _Avoid_：备份、快照
 
 **blob（内容寻址对象）**：
-以内容 `sha256` 前 16 位命名的备份文件；同一内容在项目里只存一份。批量构建时大量相同的 INCAR 因此只占一份空间。
+以内容 `sha256` 前 16 位命名的备份文件；同一批次内相同内容只保留一个 blob，不同批次目录仍各自持有恢复所需内容。
 _Avoid_：副本、备份文件
 
 **待放行计划（Pending Plan）**：
-`ProposeBuild` 产出、尚未落盘的 BuildPlan。全局最多保留一个（`plans/pending.json` 覆盖写），关闭软件后重开会提示继续或丢弃。
+`BuildInputs` 产出、尚未放行的 BuildPlan；CLI `build` 将其原子保存到 `.dftwork/plans/pending.json`，最多一个，项目重载后可继续检查或丢弃。保存 pending 不等于修改 VASP 业务文件。
 _Avoid_：草稿、临时计划
