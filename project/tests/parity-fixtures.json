@@ -1,0 +1,20 @@
+{
+  "schema_version": 1,
+  "fixtures": [
+    {
+      "name": "inline-summary",
+      "directory": "fixtures/inline-summary",
+      "golden": "golden/reference/inline-summary.json"
+    },
+    {
+      "name": "force-blocks",
+      "directory": "fixtures/force-blocks",
+      "golden": "golden/reference/force-blocks.json"
+    },
+    {
+      "name": "force-only",
+      "directory": "fixtures/force-only",
+      "golden": "golden/reference/force-only.json"
+    }
+  ]
+}

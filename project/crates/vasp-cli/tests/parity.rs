@@ -1,12 +1,23 @@
-//! 与旧实现的对拍测试。
+//! 与旧实现的确定性对拍测试。
 //!
-//! 流程：`node scripts/gen-golden.mjs` 用 reference 里的原 JS 生成
-//! `tests/golden/*.json`；这里跑同一组 fixture 的 Rust 实现，逐字段比对。
-//!
-//! 没有 golden 时测试跳过而不是失败——golden 是生成物，不进版本库。
+//! `tests/parity-fixtures.json` 显式列出必需输入和基准。输入或 golden 缺失、
+//! 读取失败都必须使测试失败，不能在 CI 中静默跳过。
 
+use serde::Deserialize;
 use std::path::{Path, PathBuf};
 use vasp_domain::{parse_oszicar, parse_outcar_forces};
+
+#[derive(Deserialize)]
+struct ParityManifest {
+    fixtures: Vec<ParityFixture>,
+}
+
+#[derive(Deserialize)]
+struct ParityFixture {
+    name: String,
+    directory: String,
+    golden: String,
+}
 
 fn repo_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -18,75 +29,88 @@ fn repo_root() -> PathBuf {
 
 #[test]
 fn convergence_matches_reference_golden() {
-    let golden_dir = repo_root().join("tests").join("golden");
-    if !golden_dir.exists() {
-        eprintln!("跳过：{} 不存在，先跑 node scripts/gen-golden.mjs", golden_dir.display());
-        return;
-    }
+    let tests_dir = repo_root().join("tests");
+    let manifest_path = tests_dir.join("parity-fixtures.json");
+    let manifest_text = std::fs::read_to_string(&manifest_path)
+        .unwrap_or_else(|error| panic!("读取对拍清单 {} 失败：{error}", manifest_path.display()));
+    let manifest: ParityManifest = serde_json::from_str(&manifest_text).expect("对拍清单必须是 JSON");
+    assert!(!manifest.fixtures.is_empty(), "对拍清单至少需要一个 fixture");
 
-    let mut checked = 0usize;
-    let entries = std::fs::read_dir(&golden_dir).expect("读 golden 目录");
-    for entry in entries.flatten() {
-        let path = entry.path();
-        if path.extension().and_then(|s| s.to_str()) != Some("json") {
-            continue;
-        }
-        let text = std::fs::read_to_string(&path).expect("读 golden");
-        let json: serde_json::Value = serde_json::from_str(&text).expect("golden 是 JSON");
+    for case in &manifest.fixtures {
+        let fixture_dir = tests_dir.join(&case.directory);
+        let golden_path = tests_dir.join(&case.golden);
+        let golden_text = std::fs::read_to_string(&golden_path)
+            .unwrap_or_else(|error| panic!("{}：读取 golden {} 失败：{error}；先运行 node scripts/gen-golden.mjs", case.name, golden_path.display()));
+        let golden: serde_json::Value = serde_json::from_str(&golden_text)
+            .unwrap_or_else(|error| panic!("{}：golden 不是有效 JSON：{error}", case.name));
+        assert_eq!(
+            golden["fixture"].as_str(),
+            Some(case.name.as_str()),
+            "{}：golden 与清单名称不一致",
+            case.name
+        );
 
-        let fixture = json["fixture"].as_str().expect("fixture 字段").to_string();
+        let oszicar_path = fixture_dir.join("OSZICAR");
+        let outcar_path = fixture_dir.join("OUTCAR");
+        let oszicar = std::fs::read_to_string(&oszicar_path)
+            .unwrap_or_else(|error| panic!("{}：读取 {} 失败：{error}", case.name, oszicar_path.display()));
+        let outcar = std::fs::read_to_string(&outcar_path)
+            .unwrap_or_else(|error| panic!("{}：读取 {} 失败：{error}", case.name, outcar_path.display()));
 
-        // golden 里记了任务目录的绝对路径。样例数据不进仓库，
-        // 所以不能再假设它躺在 tests/fixtures 下。
-        let fixture_dir = match json["fixture_dir"].as_str() {
-            Some(d) => PathBuf::from(d),
-            None => repo_root().join("tests").join("fixtures").join(&fixture),
-        };
-        if !fixture_dir.exists() {
-            eprintln!("跳过 {fixture}：目录不存在 {}", fixture_dir.display());
-            continue;
-        }
-
-        // 能量：比步数与数值
-        let oszicar = std::fs::read_to_string(fixture_dir.join("OSZICAR"))
-            .unwrap_or_default();
         let steps = parse_oszicar(&oszicar);
-
-        let expected_points = json["ionic_points"]
+        let expected_points = golden["ionic_points"]
             .as_array()
-            .expect("ionic_points 是数组");
+            .unwrap_or_else(|| panic!("{}：ionic_points 必须是数组", case.name));
         assert_eq!(
             steps.len(),
             expected_points.len(),
-            "{fixture}: 离子步数量不一致"
+            "{}：离子步数量不一致",
+            case.name
         );
-
-        for (i, (got, want)) in steps.iter().zip(expected_points.iter()).enumerate() {
-            let want_e = want
-                .get("energy")
-                .or_else(|| want.get("e"))
-                .and_then(|v| v.as_f64());
-            if let (Some(g), Some(w)) = (got.energy_ev, want_e) {
-                assert!(
-                    (g - w).abs() < 1e-6,
-                    "{fixture} 第 {i} 步能量：Rust={g}，JS={w}"
-                );
-            }
+        for (index, (got, want)) in steps.iter().zip(expected_points.iter()).enumerate() {
+            let expected_index = want["step"]
+                .as_u64()
+                .unwrap_or_else(|| panic!("{}：第 {index} 个 golden 缺少 step", case.name));
+            assert_eq!(
+                u64::from(got.index),
+                expected_index,
+                "{}：第 {index} 个离子步编号不一致",
+                case.name
+            );
+            let expected_energy = want["energy"]
+                .as_f64()
+                .unwrap_or_else(|| panic!("{}：第 {index} 个 golden 缺少 energy", case.name));
+            let actual_energy = got.energy_ev.unwrap_or_else(|| {
+                panic!("{}：第 {index} 步能量未被 Rust 解析", case.name)
+            });
+            assert!(
+                (actual_energy - expected_energy).abs() < 1e-9,
+                "{}：第 {index} 步能量 Rust={actual_energy}，JS={expected_energy}",
+                case.name
+            );
         }
 
-        // 力：比段数
-        let outcar = std::fs::read_to_string(fixture_dir.join("OUTCAR")).unwrap_or_default();
         let forces = parse_outcar_forces(&outcar);
-        let expected_forces = json["max_forces"].as_array().expect("max_forces 是数组");
+        let expected_forces = golden["max_forces"]
+            .as_array()
+            .unwrap_or_else(|| panic!("{}：max_forces 必须是数组", case.name));
         assert_eq!(
             forces.len(),
             expected_forces.len(),
-            "{fixture}: 力段数量不一致"
+            "{}：力段数量不一致",
+            case.name
         );
-
-        checked += 1;
+        for (index, (actual, expected)) in forces.iter().zip(expected_forces.iter()).enumerate() {
+            let expected = expected
+                .as_f64()
+                .unwrap_or_else(|| panic!("{}：第 {index} 个力值不是数值", case.name));
+            assert!(
+                (actual - expected).abs() < 1e-9,
+                "{}：第 {index} 个力值 Rust={actual}，JS={expected}",
+                case.name
+            );
+        }
     }
 
-    assert!(checked > 0, "一个 golden 都没比对到");
-    eprintln!("对拍通过：{checked} 个 fixture");
+    eprintln!("对拍通过：{} 个 fixture", manifest.fixtures.len());
 }

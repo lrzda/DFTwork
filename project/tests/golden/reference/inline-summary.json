@@ -1,0 +1,20 @@
+{
+  "schema_version": 1,
+  "fixture": "inline-summary",
+  "fixture_dir": "tests/fixtures/inline-summary",
+  "generator": "reference/VASPFlow/parser.js",
+  "ionic_points": [
+    {
+      "step": 1,
+      "energy": -123.45678
+    },
+    {
+      "step": 2,
+      "energy": -123.4567
+    }
+  ],
+  "max_forces": [
+    0.125,
+    0.25
+  ]
+}

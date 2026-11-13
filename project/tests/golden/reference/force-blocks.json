@@ -1,0 +1,20 @@
+{
+  "schema_version": 1,
+  "fixture": "force-blocks",
+  "fixture_dir": "tests/fixtures/force-blocks",
+  "generator": "reference/VASPFlow/parser.js",
+  "ionic_points": [
+    {
+      "step": 1,
+      "energy": -10
+    },
+    {
+      "step": 2,
+      "energy": -10.5
+    }
+  ],
+  "max_forces": [
+    0.1,
+    0.5
+  ]
+}
