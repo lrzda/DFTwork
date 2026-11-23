@@ -1,6 +1,6 @@
 {
   "name": "dftwork",
-  "version": "0.2.0",
+  "version": "0.3.1",
   "private": true,
   "description": "VASP 计算任务工作台：独立桌面软件，AI 可选",
   "license": "MIT",
