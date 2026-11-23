@@ -1,7 +1,7 @@
 # Rust 内核实现与对拍
 
 > 决策见 ADR-010：外壳 Electron，前端保留 React，内核使用 Rust，原 JS 只作行为参考。
-> 本文同步于 2026-11-06，记录当前工程形状、对拍基线和仍需遵守的行为规格；修复优先级见 [roadmap.md](roadmap.md)。
+> 本文同步于 2026-11-23（v0.3.1），记录当前工程形状、对拍基线和仍需遵守的行为规格；修复优先级见 [roadmap.md](roadmap.md)。
 
 ## 1. 当前工程形状
 
@@ -66,9 +66,9 @@ tests/golden JSON
 Rust 输出与 golden 比较
 ```
 
-当前事实（2026-11-04）：
+当前事实（2026-11-23）：
 
-- `cargo test --workspace` 共 **128 项通过**：81 domain、13 application、2 infrastructure、1 parity、31 个 CLI 集成测试（10 个写入安全 + 8 个持久化/故障注入 + 2 个解析回归 + 11 个契约回归）；
+- `cargo test --workspace` 共 **128 项通过**：81 domain、13 application、2 infrastructure、32 个 CLI 集成测试（10 个写入安全 + 8 个持久化/故障注入 + 2 个解析回归 + 11 个契约回归 + 1 个对拍回归；parity 位于 `crates/vasp-cli/tests/parity.rs`）；
 - parity 使用 3 个入库合成 fixture，`tests/parity-fixtures.json` 显式列出必需输入和 golden，缺少或读取失败会直接失败；
 - `node scripts/gen-golden.mjs` 从旧 JS 实现确定性重建 `tests/golden/reference/`，结果不含时间戳或本机绝对路径；连续重建哈希一致，CI 会检查生成物漂移；
 - 当前逐项比较离子步编号、能量和全部最大力值，覆盖汇总力优先、力矩阵回退与空 OSZICAR；状态、路径、结构、应力等字段仍未对拍；
@@ -86,13 +86,13 @@ Rust 输出与 golden 比较
 
 已验证：
 
-- Rust workspace 与桌面/npm 包版本统一为 **0.2.0**，`vaspcore --version` 输出 `vaspcore 0.2.0`；Cargo.lock 与 pnpm-lock.yaml 已同步；
-- `cargo test --workspace --locked`：81 domain + 13 application + 2 infrastructure + 1 parity + 31 CLI 集成测试，共 128 项通过；
+- Rust workspace 与桌面/npm 包版本统一为 **0.3.1**，`vaspcore --version` 输出 `vaspcore 0.3.1`；Cargo.lock 与 pnpm-lock.yaml 已同步；
+- `cargo test --workspace --locked`：81 domain + 13 application + 2 infrastructure + 32 CLI 集成测试（含 1 个对拍），共 128 项通过；
 - `cargo check --workspace`：通过，有 2 个原有的未使用代码警告；
 - TypeScript typecheck、Electron 42.11.16 / electron-vite 6.0.0 / Vite 8.3.5 生产构建和真实 Electron 手动切换项目后生成计划通过；桌面单实例双进程验收通过，第二实例退出且首窗口恢复并聚焦；
 - 升级后重新运行 `apps/desktop/tests/` 的 4 组永久 Electron 场景并全部通过：写入恢复/回滚、单实例、四类模拟 IPC 乱序，以及真实 Rust + mock Hermes 的自由对话、cwd、续接、项目切换和 IPC 契约；
 - 生产与全量 `pnpm audit` 均无已知漏洞，限定范围的 minimatch override 已生效；
-- release 内核及 0.2.0 NSIS / portable 构建成功；解包版、定制目录安装版和 portable 均在隔离用户目录完成启动与扫描，包内内核版本及三份许可已核验，测试安装已卸载；
+- release 内核及 **0.3.1** NSIS / portable 构建成功，包内内核版本 0.3.1 与三份许可已核验；0.2.0 时期曾完成解包版、定制目录安装版和 portable 的隔离用户目录启动与扫描（0.3.1 该轮验收尚未重做）；
 - 真实 Electron + Rust + Hermes 0.22.6 的两轮中文自由对话通过，第二轮记得第一轮标记，页面显示 tokens 与耗时；重载后聊天清空，仅保留模型/提供方设置；固定任务分析未单独调用真实模型；
 - 扫描、结构、收敛和对比乱序永久回归使用真实生产 React/preload 与可控模拟 IPC，不是真实后端延迟测试；PATH 中 `.cmd`、文本碎片、坏 JSONL、进程退出不一致与进程树超时另有 CLI 回归；
 - 大 OUTCAR 汇总力值、长轨迹完整计数与抽样均有真实 CLI 回归。

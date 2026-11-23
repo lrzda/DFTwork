@@ -12,7 +12,7 @@ VASP 计算任务工作台（Windows 桌面软件）。扫描项目目录，识�
 
 ## 发布包与源码构建
 
-发布页：[Releases](https://github.com/lrzda/DFTwork/releases/latest)。当前 0.2.0 NSIS / portable 包已在本机隔离目录重建、安装或启动，完成真实扫描并核对包内内核与许可文件；测试安装和隔离用户目录已清理。本机验收不代表其他干净 Windows 机器或代码签名验收。
+发布页：[Releases](https://github.com/lrzda/DFTwork/releases/latest)。最新 **v0.3.1**：npm workspace、desktop、shared 与 Rust workspace 版本统一为 0.3.1，安装包内 `vaspcore --version` 输出 `vaspcore 0.3.1`，三份许可文件已随包核验。0.2.0 时期曾完成隔离目录安装 / 启动 / 真实扫描验收；0.3.1 的该轮安装运行验收尚未重做。本机验收不代表其他干净 Windows 机器或代码签名验收。
 
 从源码运行需要 Node.js、pnpm 和 Rust；运行查看器不需要 Python、VASP 或 Hermes。Hermes 只用于可选 AI 分析。
 
@@ -42,6 +42,27 @@ node_modules/.pnpm/electron@*/node_modules/electron/dist/electron.exe apps/deskt
 
 可加 `DFTWORK_SMOKE_PANEL=scf|vibration|force|magnetization|compare`、`DFTWORK_SMOKE_TASK=<相对路径>`、`DFTWORK_SMOKE_COMPARE=<rel1>,<rel2>` 指定截图状态。
 
+## 本机构建环境（GNU 工具链）
+
+Windows 上本项目用 GNU host（`x86_64-pc-windows-gnu`）+ `-C target-feature=+crt-static`，产物是单个可直接拷贝的 exe。两个必踩的坑：
+
+**① 路径不能含非 ASCII 字符。** GNU 的 `ld` / `dlltool` 用 ANSI API 打开文件，项目目录含中文（如 `D:\软件缓存\...`）时编译 proc-macro dll 会报 `Non-UTF-8 output` 加 `No such file or directory`。把 target 目录指到纯 ASCII 路径：
+
+```bash
+export CARGO_TARGET_DIR=D:/dftwork-target
+cargo build --release -p vasp-cli
+```
+
+打包前把 release 内核复制回默认位置——`electron-builder.yml` 按 `target/release/` 取文件：
+
+```bash
+cp D:/dftwork-target/release/vaspcore.exe target/release/vaspcore.exe
+```
+
+**② 工具链自带 `dlltool` 却没有汇编器。** `cargo check` 不做链接所以能过，`cargo test` / `cargo build` 会报 `error calling dlltool 'dlltool.exe': program not found`。需要把 binutils 的 `as` / `ar` / `ranlib` / `nm` / `objdump` / `objcopy` / `strip` 放进 `$RUSTUP_HOME/toolchains/stable-x86_64-pc-windows-gnu/bin/`。
+
+`rust-toolchain.toml` 只写 `channel = "stable"`，host 交给各环境的 default host：本机用 `rustup-init --default-host x86_64-pc-windows-gnu` 安装，CI runner 默认 msvc。写成 `stable-x86_64-pc-windows-gnu` 会让未预装该工具链的 runner 直接报 `target tuple in channel name`。
+
 ## 自动化验证
 
 先完成上述 debug 内核构建和 `pnpm install`，再运行：
@@ -52,7 +73,7 @@ pnpm test:desktop
 
 该命令构建生产 Electron 页面，并运行 4 组永久回归：写入恢复/回滚、桌面单实例、四类过期响应保护，以及 Hermes 对话与项目切换。写入和 Hermes 场景使用真实 Rust 内核；竞态场景使用真实生产 React/preload 与可控模拟 IPC，不代表真实后端延迟测试。测试项目与 Electron 用户目录均隔离在临时目录，结束后自动清理，不调用真实 Hermes。
 
-`.github/workflows/ci.yml` 已配置 Windows CI，执行 golden 重建校验、Rust 全量测试/检查、TypeScript typecheck、Electron 构建与上述端到端测试。CI 远端首次运行尚未验收。
+`.github/workflows/ci.yml` 已配置 Windows CI，执行 golden 重建校验、Rust 全量测试/检查、TypeScript typecheck、Electron 构建与上述端到端测试。此前三次远端运行全部失败，两处根因已在 v0.3.1 修复：`rust-toolchain.toml` 把 target triple 写进了 `channel`（新版 rustup 报 `target tuple in channel name`），以及 `hermes_chat_uses_project_cwd_message_and_resume` 假定临时目录路径不含 8.3 短名。CI 同时改用官方 npm / Electron 源，不再走 `project/.npmrc` 的国内镜像。
 
 ## 当前已有能力
 
@@ -127,15 +148,25 @@ DFTwork/
 
 ## 验证基线
 
-2026-11-06 依赖、版本、许可与本机发布验收后：
+### v0.3.1（2026-11-23）
+
+- **版本统一**：npm workspace、desktop、shared 与 Rust workspace 均为 **0.3.1**，`vaspcore --version` 输出 `vaspcore 0.3.1`。此前 0.3.0 只升了 `apps/desktop`，内核与其余包仍是 0.2.0，导致「应用 0.3.0 / 内核 0.2.0」两套版本并存；
+- **测试**：`cargo test --workspace --locked` 共 **128 项通过**——81 domain + 13 application + 2 infrastructure + 32 CLI 集成（10 写入安全 + 8 持久化/故障注入 + 2 解析 + 11 契约 + 1 对拍）。此前文档把对拍单列、CLI 记作 31，实际 parity 位于 `crates/vasp-cli/tests/parity.rs`，属 CLI 集成测试；
+- **前端**：`pnpm typecheck` 与 `pnpm --filter @dftwork/desktop build`（Vite 8.3.5）通过；
+- **发布包**：`DFTwork-0.3.1-x64.exe` 与 `DFTwork-0.3.1-portable.exe` 构建成功，包内内核版本 0.3.1、`resources/licenses/` 三份许可已核验。未执行安装运行验收，未配置代码签名；
+- **构建环境**：rustup 1.100.0 / rustc 1.100.0（GNU host）。项目目录含中文，编译必须把 `CARGO_TARGET_DIR` 指到纯 ASCII 路径，详见「本机构建环境」。
+
+### v0.2.0（2026-11-06，历史基线）
+
+以下为 0.2.0 时期的验收记录，版本号与测试分布按当时状态保留：
 
 - npm workspace、desktop、shared 和 Rust workspace 版本统一为 **0.2.0**，`vaspcore --version` 输出 `vaspcore 0.2.0`；repository 已统一指向 `lrzda/DFTwork`；
 - Electron 固定为 42.11.16，electron-builder / electron-vite / Vite / Zod 已升级，旧 minimatch 链按版本范围修复；生产与全量 `pnpm audit` 均为 **No known vulnerabilities found**；
-- `cargo test --workspace --locked`：81 domain + 13 application + 2 infrastructure + 1 parity + 31 CLI 集成测试，共 **128 项通过**；仍有 2 个原有的未使用代码警告；
+- `cargo test --workspace --locked`：81 domain + 13 application + 2 infrastructure + 32 CLI 集成测试（含 1 个对拍），共 **128 项通过**；仍有 2 个原有的未使用代码警告；
 - shared、node、web 三组 TypeScript typecheck 和 Electron 42.11.16 / electron-vite 6.0.0 / Vite 8.3.5 生产构建通过；
 - 升级后重新运行 `apps/desktop/tests/` 的 **4 组永久 Electron 场景**并全部通过：写入恢复/回滚、单实例、四类模拟 IPC 乱序，以及真实 Rust + mock Hermes 对话与项目切换；测试目录由运行器自动清理；
 - release 内核和 0.2.0 NSIS / portable 构建成功；解包版、定制目录安装版和 portable 均在隔离用户目录完成启动与扫描，包内内核和三份许可核验通过；测试安装与临时目录已清理，发布产物保留；
-- Windows CI 配置已新增，覆盖 golden 重建校验、Rust test/check、TypeScript typecheck、Electron 生产构建和上述永久 E2E；按当前计划暂不提交或运行远端 CI；
+- Windows CI 配置已新增，覆盖 golden 重建校验、Rust test/check、TypeScript typecheck、Electron 生产构建和上述永久 E2E（当时计划暂不推送；后续推送暴露了 rust-toolchain 写法与 8.3 短名断言问题，见 v0.3.1 节）；
 - 永久 Hermes mock 回归验证自由消息、中文输入、会话续接、项目 A→B 的 cwd 切换与会话重置，以及 IPC 入参校验和错误码保留；另有 PATH 中 `.cmd`、文本碎片、坏 JSONL、进程退出不一致和进程树超时回归；
 - 真实 Electron + Rust + Hermes 0.22.6 两轮中文自由对话与续接通过，第二轮正确返回第一轮标记，显示 tokens 和耗时；页面重载后聊天清空，仅保留模型/提供方设置。固定任务 `analyze` 未单独调用真实模型，H2 工具面未实现；
 - 永久竞态回归使用真实生产 React/preload 和可控模拟 IPC，覆盖扫描、结构、收敛、对比乱序响应及扫描 loading 保护；修改前四场景均失败，修改后均通过，但不代表真实后端延迟测试；

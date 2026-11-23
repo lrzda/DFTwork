@@ -1,8 +1,10 @@
 # 当前状态与收敛路线图
 
-> 同步于 2026-11-06。本文是当前计划与验收状态的唯一正文；[architecture.md](architecture.md) 说明架构，[decisions.md](decisions.md) 保留历史决策。
+> 同步于 2026-11-23（v0.3.1）。本文是当前计划与验收状态的唯一正文；[architecture.md](architecture.md) 说明架构，[decisions.md](decisions.md) 保留历史决策。
 >
 > **“已有代码”不等于“完成验收”。** 查看器主流程、P0 单次写入/崩溃恢复/回滚、桌面单实例锁与本机 NSIS / portable 发布验收已完成；备份仍不能替代独立数据备份。
+>
+> v0.3.1 统一了 npm / Rust 包版本（0.3.0 只升了 `apps/desktop`，内核仍是 0.2.0），修复了让远端 CI 必红的两处问题，并已推送验证。
 
 ## 1. 里程碑现状
 
@@ -14,7 +16,7 @@
 | **M2.5 属性面板** | SCF、每原子力、应力、频率、力常数、总磁矩 | 🟡 面板已接入；首离子步编号已修正，完整真实 OUTCAR 验收仍需继续 |
 | **M3 AI 通道** | H1：任务分析 CLI、项目 cwd 自由对话、会话续接、文本与用量显示 | 🟢 H1 自由对话及真实续接已验收；聊天仅存内存；固定任务真实分析未单独验收，H2 插件工具面未实现 |
 | **M4 构建与放行** | build/apply/rollback、pending/回执找回、manifest/journal 崩溃恢复、保留策略与历史回执 UI | 🟢 P0 单次写入安全与真实 UI 验收完成；写入恢复/回滚和单实例已有永久 Electron 回归，其他 UI 自动化仍属后续工作 |
-| **M5 打包与发布** | 0.2.0 release 内核、NSIS 与 portable；版本、依赖、审计和许可均已整理 | 🟢 本机隔离目录安装/启动/扫描、包内内核和许可验收通过；其他干净 Windows 机器、代码签名与远端 CI 未验收 |
+| **M5 打包与发布** | 0.3.1 release 内核、NSIS 与 portable；所有 npm / Rust 包版本已统一 | 🟢 包构建、包内内核版本与许可核验通过；0.3.1 的安装运行验收尚未重做（沿用 0.2.0 结论）；其他干净 Windows 机器与代码签名未验收 |
 | **M6 轨迹播放** | XDATCAR CLI、两遍流式扫描、均匀抽样与前端播放器 | 🟡 长轨迹、scale 和变胞提醒回归通过；变胞后段仍按首帧晶格渲染 |
 
 原 README 的“M0–M6 全部完成”表示各方向均已有实现，**不再作为验收结论使用**。
@@ -65,23 +67,35 @@ P0 完成不代表备份可替代独立数据备份。桌面单实例锁现已�
 
 桌面单实例锁已落地并通过真实双进程验收：第二实例以退出码 0 退出，首实例已有窗口恢复、显示并聚焦。P0 UI 往返、单实例、四类过期响应和 Hermes mock 对话共 4 组场景已沉淀为永久测试，由 `pnpm test:desktop` 统一构建和运行。该锁仅约束桌面应用，不保护外部 CLI 或其他进程并发写同一项目。
 
-1. 已新增 Windows CI，运行 golden 重建校验、`cargo test --workspace`、`cargo check --workspace`、前端 typecheck/build 和真实 CLI/Electron 集成测试；按当前计划暂不提交或运行远端 CI。
+1. 已新增 Windows CI，运行 golden 重建校验、`cargo test --workspace`、`cargo check --workspace`、前端 typecheck/build 和真实 CLI/Electron 集成测试。远端已推送并暴露两处必红根因，均在 v0.3.1 修复：`rust-toolchain.toml` 的 channel 写成 `stable-x86_64-pc-windows-gnu` 被新版 rustup 拒绝（`target tuple in channel name`）；`hermes_chat_uses_project_cwd_message_and_resume` 假定临时目录路径不含 8.3 短名。CI 另改用官方 npm / Electron 源。
 2. 已加入 3 个入库合成夹具、显式必需清单和可重复生成的 golden；缺文件/读取失败会报错，重复生成无差异，CI 会检查基准漂移。
 3. 当前对拍逐项比较离子步编号、能量和全部最大力值；状态、路径、应力和结构等关键字段仍需继续覆盖。
 4. 扫描/结构/收敛/对比乱序及 Hermes mock 对话已有永久自动化；继续补充真实后端延迟、其他属性面板和更多真实文件场景。
-5. **源码依赖整理已完成**：npm workspace、desktop、shared 与 Rust workspace 统一为 0.2.0，repository 指向 `lrzda/DFTwork`；Electron 42.11.16、electron-builder 26.18.0、electron-vite 6.0.0、Vite 8.3.5 与 Zod 4.6.7 的本地构建和 E2E 已通过。限定范围的 minimatch override 已生效，生产与全量 `pnpm audit` 均无已知漏洞。
+5. **源码依赖整理（0.2.0 时期；v0.3.1 已再次统一为 0.3.1）**：npm workspace、desktop、shared 与 Rust workspace 曾统一为 0.2.0，repository 指向 `lrzda/DFTwork`；Electron 42.11.16、electron-builder 26.18.0、electron-vite 6.0.0、Vite 8.3.5 与 Zod 4.6.7 的本地构建和 E2E 已通过。限定范围的 minimatch override 已生效，生产与全量 `pnpm audit` 均无已知漏洞。
 6. **许可源码、配置与实物已核验**：`reference/VASPFlow/LICENSE` 保存上游完整 MIT 文本及版权声明，根 `NOTICE` 记录来源；安装目录的 `resources/licenses/` 包含三份许可，且与源文件逐字一致。
-7. **本机发布验收已完成**：release 内核及 NSIS / portable 0.2.0 包重建成功；解包版、NSIS 定制目录安装版和 portable 均使用隔离 APPDATA 完成启动、真实扫描和截图。包内内核输出版本 0.2.0；测试安装与隔离目录已卸载清理，安装包保留在 `apps/desktop/dist/`。这不代表其他干净 Windows 机器或代码签名验收。
+7. **本机发布验收（0.2.0 时期）**：release 内核及 NSIS / portable 0.2.0 包重建成功；解包版、NSIS 定制目录安装版和 portable 均使用隔离 APPDATA 完成启动、真实扫描和截图。包内内核输出版本 0.2.0；测试安装与隔离目录已卸载清理，安装包保留在 `apps/desktop/dist/`。这不代表其他干净 Windows 机器或代码签名验收。
 
-## 3. 已验证基线（2026-11-06）
+## 3. 已验证基线
+
+### 0.3.1（2026-11-23）
+
+- 所有 npm / Rust 包版本统一为 **0.3.1**，`vaspcore --version` 输出 `vaspcore 0.3.1`；Cargo.lock 已同步，`--locked` 构建与测试通过；
+- `cargo test --workspace --locked`：81 domain + 13 application + 2 infrastructure + 32 CLI 集成（10 写入安全 + 8 持久化/故障注入 + 2 解析 + 11 契约 + 1 对拍），**共 128 项通过**；
+- `pnpm typecheck`、`pnpm --filter @dftwork/desktop build`（Vite 8.3.5）通过；
+- `DFTwork-0.3.1-x64.exe` / `DFTwork-0.3.1-portable.exe` 构建成功，包内内核版本 0.3.1、三份许可核验通过；未做安装运行验收，未配置代码签名；
+- 本机构建需把 `CARGO_TARGET_DIR` 指到纯 ASCII 路径（项目目录含中文，GNU 链接器处理不了），见 README「本机构建环境」。
+
+### 0.2.0（2026-11-06，历史基线）
+
+以下记录按当时状态保留：
 
 - `vaspcore --version` 输出 `vaspcore 0.2.0`；Cargo.lock 与 pnpm-lock.yaml 已同步，frozen lockfile 安装通过。
-- `cargo test --workspace --locked`：81 domain + 13 application + 2 infrastructure + 1 parity + 31 CLI 集成测试（10 写入安全 + 8 持久化/故障注入 + 2 解析 + 11 契约），**共 128 项通过**；`cargo check --workspace` 此前通过，仍有 2 个原有的未使用代码警告。
+- `cargo test --workspace --locked`：81 domain + 13 application + 2 infrastructure + 32 CLI 集成测试（10 写入安全 + 8 持久化/故障注入 + 2 解析 + 11 契约 + 1 对拍），**共 128 项通过**；`cargo check --workspace` 此前通过，仍有 2 个原有的未使用代码警告。
 - shared、node、web 三组 TypeScript 类型检查及 Electron 42.11.16 / electron-vite 6.0.0 / Vite 8.3.5 生产构建通过。
 - 升级后重新运行 `apps/desktop/tests/` 的 **4 组永久 Electron 场景**并全部通过：普通 UI 写入恢复/回滚、单实例、四类模拟 IPC 乱序，以及真实 Rust + mock Hermes 对话与项目切换。隔离目录自动清理，不调用真实 Hermes。
 - `pnpm audit --prod` 与全量 `pnpm audit` 均返回 **No known vulnerabilities found**；`git diff --check` 通过。
 - release 内核、`DFTwork-0.2.0-x64.exe` 与 `DFTwork-0.2.0-portable.exe` 构建成功；解包版、NSIS 安装版和 portable 均在隔离用户目录完成启动和扫描，包内内核与三份许可核验通过，未配置代码签名。
-- `.github/workflows/ci.yml` 已新增 Windows CI，覆盖 golden 重建校验、Rust test/check、TypeScript typecheck、Electron 构建和上述永久 E2E；按当前计划暂不提交或运行远端 CI。
+- `.github/workflows/ci.yml` 已新增 Windows CI，覆盖 golden 重建校验、Rust test/check、TypeScript typecheck、Electron 构建和上述永久 E2E（当时未推送；后续推送暴露的问题与修复见 0.3.1 节）。
 - 永久 Hermes mock 回归验证自由消息、中文输入、同项目续接、项目 A→B 的 cwd 切换与会话重置，以及 IPC Zod 校验和原始错误码保留。
 - 真实 Electron + Rust + Hermes 0.22.6 完成两轮真实自由对话及续接：3985 / 4018 tokens，11.4 / 9.3 秒；第二轮返回第一轮标记 `DFT-731`。重载后该标记消失，localStorage 仅有 `dftwork.ai.model` 和 `dftwork.ai.provider`。该真实付费验收使用独立临时驱动，与永久离线 mock 回归分开记录。
 - 永久竞态回归使用真实生产 React/preload 和可控模拟 IPC，扫描、结构、收敛、对比四类乱序及扫描 loading 保护均通过；修改前四场景均复现旧响应覆盖。该测试未验证真实后端延迟。

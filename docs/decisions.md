@@ -2,7 +2,7 @@
 
 格式：一条决策一节。状态为 `accepted` 的条目，改动前必须先写新 ADR 并标注它被取代。
 
-> **实现状态注记（2026-11-04）**：`accepted` 表示设计方向已决定，不表示对应功能已经实现或通过验收。下文保留决策时的背景和估算；如与当前代码状态冲突，以 [architecture.md](architecture.md) 和 [roadmap.md](roadmap.md) 为准。
+> **实现状态注记（2026-11-04 记录，2026-11-23 复核）**：`accepted` 表示设计方向已决定，不表示对应功能已经实现或通过验收。下文保留决策时的背景和估算；如与当前代码状态冲突，以 [architecture.md](architecture.md) 和 [roadmap.md](roadmap.md) 为准。
 
 | 相关 ADR | 当前实现状态 |
 |---|---|
