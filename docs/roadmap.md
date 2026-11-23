@@ -67,7 +67,7 @@ P0 完成不代表备份可替代独立数据备份。桌面单实例锁现已�
 
 桌面单实例锁已落地并通过真实双进程验收：第二实例以退出码 0 退出，首实例已有窗口恢复、显示并聚焦。P0 UI 往返、单实例、四类过期响应和 Hermes mock 对话共 4 组场景已沉淀为永久测试，由 `pnpm test:desktop` 统一构建和运行。该锁仅约束桌面应用，不保护外部 CLI 或其他进程并发写同一项目。
 
-1. 已新增 Windows CI，运行 golden 重建校验、`cargo test --workspace`、`cargo check --workspace`、前端 typecheck/build 和真实 CLI/Electron 集成测试。远端已推送并暴露两处必红根因，均在 v0.3.1 修复：`rust-toolchain.toml` 的 channel 写成 `stable-x86_64-pc-windows-gnu` 被新版 rustup 拒绝（`target tuple in channel name`）；`hermes_chat_uses_project_cwd_message_and_resume` 假定临时目录路径不含 8.3 短名。CI 另改用官方 npm / Electron 源。
+1. 已新增 Windows CI，运行 golden 重建校验、`cargo test --workspace`、`cargo check --workspace`、前端 typecheck/build 和真实 CLI/Electron 集成测试。远端推送暴露了两处必红根因，均在 v0.3.1 修复，**最新运行（`d5c6b35`）2m49s 全绿**：`rust-toolchain.toml` 的 channel 写成 `stable-x86_64-pc-windows-gnu` 被新版 rustup 拒绝（`target tuple in channel name`）；Hermes 对话测试假定临时目录路径不含 8.3 短名（Rust 与 e2e 各一处）。CI 另改用官方 npm / Electron 源。
 2. 已加入 3 个入库合成夹具、显式必需清单和可重复生成的 golden；缺文件/读取失败会报错，重复生成无差异，CI 会检查基准漂移。
 3. 当前对拍逐项比较离子步编号、能量和全部最大力值；状态、路径、应力和结构等关键字段仍需继续覆盖。
 4. 扫描/结构/收敛/对比乱序及 Hermes mock 对话已有永久自动化；继续补充真实后端延迟、其他属性面板和更多真实文件场景。

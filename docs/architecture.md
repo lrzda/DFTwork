@@ -189,7 +189,7 @@ DFTwork/
 | 前端 | typecheck 与生产构建通过；真实生产 React/preload + 可控模拟 IPC 的四类乱序场景已有永久回归 | 补真实后端延迟、其他属性面板和更多交互自动化 |
 | Electron | 4 组永久场景及真实付费 Hermes 两轮续接通过；0.2.0 解包版、NSIS 安装版和 portable 均在隔离用户目录完成启动与扫描；0.3.1 包已构建并核验包内内核 | 真实固定任务分析、H2 工具面、其他干净 Windows 机器、代码签名和更多永久 UI 自动化 |
 | 对拍 | 3 个入库合成 fixture 通过；显式清单缺失即失败，golden 确定性重建无差异；逐步比较离子步编号、能量和全部力值 | 状态、路径、应力、结构及更多真实文件比较 |
-| 静态与供应链 | 全 workspace 版本为 **0.3.1**；Electron 42.11.16 构建及四组 E2E 通过，pnpm 生产/全量审计均为 0；包内内核 0.3.1 及 `resources/licenses/` 三份许可已核验 | 远端 CI 已修复并推送、待确认转绿；格式化、clippy 与 cargo audit 尚未验收 |
+| 静态与供应链 | 全 workspace 版本为 **0.3.1**；Electron 42.11.16 构建及四组 E2E 通过，pnpm 生产/全量审计均为 0；包内内核 0.3.1 及 `resources/licenses/` 三份许可已核验 | 远端 CI 已转绿（2m49s）；格式化、clippy 与 cargo audit 尚未验收 |
 
 早期设计图仍可用于理解目标分层，但其中 ScannerWorker、BuildQueue 等不应按当前实现读取：
 

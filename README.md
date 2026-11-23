@@ -73,7 +73,7 @@ pnpm test:desktop
 
 该命令构建生产 Electron 页面，并运行 4 组永久回归：写入恢复/回滚、桌面单实例、四类过期响应保护，以及 Hermes 对话与项目切换。写入和 Hermes 场景使用真实 Rust 内核；竞态场景使用真实生产 React/preload 与可控模拟 IPC，不代表真实后端延迟测试。测试项目与 Electron 用户目录均隔离在临时目录，结束后自动清理，不调用真实 Hermes。
 
-`.github/workflows/ci.yml` 已配置 Windows CI，执行 golden 重建校验、Rust 全量测试/检查、TypeScript typecheck、Electron 构建与上述端到端测试。此前三次远端运行全部失败，两处根因已在 v0.3.1 修复：`rust-toolchain.toml` 把 target triple 写进了 `channel`（新版 rustup 报 `target tuple in channel name`），以及 `hermes_chat_uses_project_cwd_message_and_resume` 假定临时目录路径不含 8.3 短名。CI 同时改用官方 npm / Electron 源，不再走 `project/.npmrc` 的国内镜像。
+`.github/workflows/ci.yml` 已配置 Windows CI，执行 golden 重建校验、Rust 全量测试/检查、TypeScript typecheck、Electron 构建与上述端到端测试。此前三次远端运行全部失败，两处根因已在 v0.3.1 修复，最新运行（`d5c6b35`）**2m49s 全绿**：`rust-toolchain.toml` 把 target triple 写进了 `channel`（新版 rustup 报 `target tuple in channel name`），以及 Hermes 对话测试假定临时目录路径不含 8.3 短名（Rust 与 e2e 各一处）。CI 同时改用官方 npm / Electron 源，不再走 `project/.npmrc` 的国内镜像。
 
 ## 当前已有能力
 
