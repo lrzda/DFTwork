@@ -6,10 +6,14 @@ const path = require("node:path");
 const sandbox = process.env.DFTWORK_E2E_SANDBOX;
 if (!sandbox) throw new Error("DFTWORK_E2E_SANDBOX is required");
 const work = path.join(sandbox, "hermes-chat");
-const rootA = path.join(work, "project A");
-const rootB = path.join(work, "project B");
-fs.mkdirSync(rootA, { recursive: true });
-fs.mkdirSync(rootB, { recursive: true });
+fs.mkdirSync(path.join(work, "project A"), { recursive: true });
+fs.mkdirSync(path.join(work, "project B"), { recursive: true });
+// Windows 的 TEMP 常是 8.3 短名（CI 的 RUNNER~1 / 本机的 BEIMIN~1），而
+// CreateProcess 传给子进程的 cwd 会被操作系统还原成长名。必须用
+// realpathSync.native（走 OS 原生 API）——普通 realpathSync 会原样保留短名，
+// 断言仍然对不上。这样测试结果不取决于用户名长度。
+const rootA = fs.realpathSync.native(path.join(work, "project A"));
+const rootB = fs.realpathSync.native(path.join(work, "project B"));
 const capture = path.join(work, "capture.txt");
 const mock = path.join(work, "mock hermes.cmd");
 fs.writeFileSync(
