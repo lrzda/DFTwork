@@ -14,6 +14,11 @@ jobs:
     defaults:
       run:
         working-directory: project
+    env:
+      # GitHub runner 在境外，project/.npmrc 里的 npmmirror 会大面积超时（实测重试 1m46s）。
+      # CI 覆盖回官方源；本地开发仍走 .npmrc 的国内镜像。
+      npm_config_registry: https://registry.npmjs.org/
+      ELECTRON_MIRROR: https://github.com/electron/electron/releases/download/
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4

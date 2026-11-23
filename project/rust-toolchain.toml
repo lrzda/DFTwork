@@ -1,5 +1,10 @@
 [toolchain]
-channel = "stable-x86_64-pc-windows-gnu"
+# 只写通道名，不写 host triple：rustup 会把 stable 解析到「本机 default host」。
+# 本机安装时用 --default-host x86_64-pc-windows-gnu，CI runner (windows-latest) 是 msvc，
+# 同一个模板因此两边都能用。
+# 写成 "stable-x86_64-pc-windows-gnu" 时，未预装该工具链的环境（GitHub runner）会直接报
+#   error: target tuple in channel name 'stable-x86_64-pc-windows-gnu'
+channel = "stable"
 # 不写 components：minimal profile 里没有 rustfmt/clippy，
 # 一旦声明，rustup 每次调用都会联网同步通道并卡住。
 profile = "minimal"
