@@ -264,7 +264,13 @@ fn hermes_chat_uses_project_cwd_message_and_resume() {
     assert_eq!(envelope["data"]["session_id"], "session-next");
 
     let captured = std::fs::read_to_string(capture).expect("读取 mock 调用记录");
-    assert!(captured.contains(&format!("cwd={}", root.display())), "{captured}");
+    // Windows 的 TMP/TEMP 常是 8.3 短名（如 C:\Users\BEIMIN~1\...），而 CreateProcess
+    // 传给子进程的 cwd 会被操作系统还原成长名。比较前统一取长名再做包含判断，
+    // 否则测试结果会取决于用户名长度（CI 的 runneradmin 同样会被短名成 RUNNER~1）。
+    let root_abs = std::fs::canonicalize(&root).unwrap_or_else(|_| root.clone());
+    let root_text = root_abs.display().to_string();
+    let root_text = root_text.strip_prefix(r"\\?\").unwrap_or(&root_text);
+    assert!(captured.contains(&format!("cwd={root_text}")), "{captured}");
     assert!(captured.contains("第一个问题\n第二行"), "{captured}");
     assert!(captured.contains("--resume session-before"), "{captured}");
     assert!(captured.contains("--model test-model"), "{captured}");
